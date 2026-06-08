@@ -47,6 +47,8 @@ type BattleNote = {
   holding?: boolean;
   holdRating?: HitRating;
   holdLastTickAt?: number;
+  skillGenerated?: boolean;
+  skippedBySkill?: boolean;
 };
 
 type ActiveEffects = {
@@ -75,6 +77,11 @@ type HoldTransfer = {
   noteId: string;
   requiredLane: number;
   until: number;
+};
+
+type FinalScores = {
+  A: number;
+  B: number;
 };
 
 const TURN_DURATION = 30;
@@ -152,7 +159,7 @@ const characters: Character[] = [
     skillName: "이지모드",
     skillTarget: "own",
     costRatio: 0,
-    desc: "판정 범위 증가, Good 보너스.",
+    desc: "5초 동안 안정적인 롱노트 구간을 만든다.",
   },
   {
     id: "kai",
@@ -234,8 +241,12 @@ function generateNotesFromMusicChart(turnIndex: number) {
   const globalStart = turnIndex * TURN_DURATION;
   const globalEnd = globalStart + TURN_DURATION;
 
-  return (MUSIC_CHART as MusicChartNote[])
-    .filter((chartNote) => chartNote.time >= globalStart && chartNote.time < globalEnd)
+  const chartNotes = (MUSIC_CHART as MusicChartNote[])
+    .filter(
+      (chartNote) =>
+        chartNote.time >= globalStart + 0.8 &&
+        chartNote.time < globalEnd - 0.6
+    )
     .map((chartNote, index) => ({
       id: `turn-${turnIndex}-chart-${index}-${chartNote.type}`,
       type: chartNote.type,
@@ -243,8 +254,37 @@ function generateNotesFromMusicChart(turnIndex: number) {
       targetTime: chartNote.time - globalStart,
       duration: chartNote.type === "hold" ? chartNote.duration ?? 1.1 : 0,
       judged: false,
-    }))
-    .sort((a, b) => a.targetTime - b.targetTime);
+    }));
+
+  const filledNotes: BattleNote[] = [...chartNotes];
+
+  let cursor = 1.1;
+  let laneSeed = turnIndex;
+
+  while (cursor <= TURN_DURATION - 0.9) {
+    const hasNearbyNote = filledNotes.some(
+      (note) => Math.abs(note.targetTime - cursor) < 0.55
+    );
+
+    if (!hasNearbyNote) {
+      const lane = laneSeed % LANE_COUNT;
+
+      filledNotes.push({
+        id: `turn-${turnIndex}-fill-${cursor.toFixed(2)}-${lane}`,
+        type: "tap",
+        lane,
+        targetTime: cursor,
+        duration: 0,
+        judged: false,
+      });
+
+      laneSeed += 1;
+    }
+
+    cursor += 0.78;
+  }
+
+  return filledNotes.sort((a, b) => a.targetTime - b.targetTime);
 }
 
 export default function App() {
@@ -269,6 +309,7 @@ export default function App() {
   const [notes, setNotes] = useState<BattleNote[]>([]);
   const [scoreA, setScoreA] = useState(0);
   const [scoreB, setScoreB] = useState(0);
+  const [finalScores, setFinalScores] = useState<FinalScores | null>(null);
   const [combo, setCombo] = useState(0);
 
   const [cooldowns, setCooldowns] = useState<Record<string, number>>({});
@@ -293,6 +334,8 @@ export default function App() {
   const notesRef = useRef<BattleNote[]>([]);
   const processedNoteIdsRef = useRef<Set<string>>(new Set());
   const comboRef = useRef(0);
+  const scoreARef = useRef(0);
+  const scoreBRef = useRef(0);
 
   const currentElapsedRef = useRef(0);
   const currentTurnSideRef = useRef<Side>("A");
@@ -374,6 +417,9 @@ export default function App() {
       setServerRoom(state);
 
       if (state.scores) {
+        scoreARef.current = state.scores.A;
+        scoreBRef.current = state.scores.B;
+
         setScoreA(state.scores.A);
         setScoreB(state.scores.B);
       }
@@ -396,6 +442,9 @@ export default function App() {
     socket.on("battleStarted", ({ firstSide, turnIndex, startedAt }) => {
       const firstNotes = generateNotesFromMusicChart(turnIndex);
 
+      scoreARef.current = 0;
+      scoreBRef.current = 0;
+
       setFirstSide(firstSide);
       resetTurnStateOnly();
       setTurnIndex(turnIndex);
@@ -403,6 +452,7 @@ export default function App() {
       setElapsed(0);
       setScoreA(0);
       setScoreB(0);
+      setFinalScores(null);
       setCooldowns({});
       setPendingSkill(null);
       setNotesSafe(firstNotes);
@@ -422,6 +472,9 @@ export default function App() {
     });
 
     socket.on("noteResult", (payload) => {
+      scoreARef.current = payload.scores.A;
+      scoreBRef.current = payload.scores.B;
+
       setScoreA(payload.scores.A);
       setScoreB(payload.scores.B);
 
@@ -429,11 +482,12 @@ export default function App() {
         markRemoteNoteJudged(payload.noteId);
 
         if (payload.rating === "MISS" || payload.rating === "TAUNT MISS") {
-          showFeedback(payload.rating, "miss");
+          showFeedback(payload.rating, "miss", "combo break");
         } else {
           showFeedback(
-            `${payload.rating} ${getComboMultiplierLabel(payload.combo)}`,
-            payload.rating === "PERFECT" ? "perfect" : "good"
+            payload.rating,
+            payload.rating === "PERFECT" ? "perfect" : "good",
+            `${payload.combo}combo ${getComboMultiplierLabel(payload.combo)}`
           );
         }
       }
@@ -450,6 +504,25 @@ export default function App() {
       }
     );
 
+    socket.on("battleEnded", ({ scores }) => {
+      const finalA = scores?.A ?? scoreARef.current;
+      const finalB = scores?.B ?? scoreBRef.current;
+
+      scoreARef.current = finalA;
+      scoreBRef.current = finalB;
+
+      setScoreA(finalA);
+      setScoreB(finalB);
+      setFinalScores({
+        A: finalA,
+        B: finalB,
+      });
+
+      resetTurnStateOnly();
+      stopBattleMusic();
+      setPhase("result");
+    });
+
     return () => {
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
@@ -461,6 +534,7 @@ export default function App() {
       socket.off("turnChanged");
       socket.off("noteResult");
       socket.off("skillActivated");
+      socket.off("battleEnded");
     };
   }, []);
 
@@ -484,6 +558,14 @@ export default function App() {
     comboRef.current = combo;
   }, [combo]);
 
+  useEffect(() => {
+    scoreARef.current = scoreA;
+  }, [scoreA]);
+
+  useEffect(() => {
+    scoreBRef.current = scoreB;
+  }, [scoreB]);
+
   function playBattleMusic(globalStartSec: number) {
     const audio = musicRef.current;
     if (!audio) return;
@@ -493,7 +575,7 @@ export default function App() {
     audio.volume = 0.75;
 
     audio.play().catch(() => {
-      showFeedback("화면을 터치하면 음악 재생", "skill");
+      showFeedback("음악 재생 대기", "skill", "화면을 한 번 터치해줘");
     });
   }
 
@@ -516,9 +598,14 @@ export default function App() {
     setNotes(nextNotes);
   }
 
-  function showFeedback(text: string, kind: Feedback["kind"]) {
+  function showFeedback(
+    title: string,
+    kind: Feedback["kind"],
+    sub?: string
+  ) {
     setFeedback({
-      text,
+      title,
+      sub,
       kind,
       key: Date.now() + Math.random(),
     });
@@ -606,9 +693,21 @@ export default function App() {
     if (costRatio <= 0) return;
 
     if (mySideRef.current === "A") {
-      setScoreA((prev) => Math.max(0, prev - Math.floor(prev * costRatio)));
+      const next = Math.max(
+        0,
+        scoreARef.current - Math.floor(scoreARef.current * costRatio)
+      );
+
+      scoreARef.current = next;
+      setScoreA(next);
     } else {
-      setScoreB((prev) => Math.max(0, prev - Math.floor(prev * costRatio)));
+      const next = Math.max(
+        0,
+        scoreBRef.current - Math.floor(scoreBRef.current * costRatio)
+      );
+
+      scoreBRef.current = next;
+      setScoreB(next);
     }
   }
 
@@ -621,7 +720,7 @@ export default function App() {
       feverUntil: 0,
     }));
 
-    showFeedback(text, "miss");
+    showFeedback(text, "miss", "combo break");
   }
 
   function emitNoteResult(
@@ -642,9 +741,11 @@ export default function App() {
 
   function applyLocalScoreDelta(scoreDelta: number) {
     if (mySideRef.current === "A") {
-      setScoreA((prev) => prev + scoreDelta);
+      scoreARef.current += scoreDelta;
+      setScoreA(scoreARef.current);
     } else {
-      setScoreB((prev) => prev + scoreDelta);
+      scoreBRef.current += scoreDelta;
+      setScoreB(scoreBRef.current);
     }
   }
 
@@ -670,8 +771,9 @@ export default function App() {
     comboRef.current = nextCombo;
 
     showFeedback(
-      `${rating} ${getComboMultiplierLabel(nextCombo)}`,
-      rating === "PERFECT" ? "perfect" : "good"
+      rating,
+      rating === "PERFECT" ? "perfect" : "good",
+      `${nextCombo}combo ${getComboMultiplierLabel(nextCombo)}`
     );
 
     markNoteJudged(note.id);
@@ -694,10 +796,9 @@ export default function App() {
     comboRef.current = nextCombo;
 
     showFeedback(
-      `${
-        rating === "PERFECT" ? "PERFECT HOLD" : "GOOD HOLD"
-      } ${getComboMultiplierLabel(nextCombo)}`,
-      rating === "PERFECT" ? "perfect" : "good"
+      rating === "PERFECT" ? "PERFECT HOLD" : "GOOD HOLD",
+      rating === "PERFECT" ? "perfect" : "good",
+      `${nextCombo}combo ${getComboMultiplierLabel(nextCombo)}`
     );
 
     emitNoteResult(tickId, rating, totalScore, nextCombo);
@@ -799,7 +900,7 @@ export default function App() {
     pressLane(event.pointerId, displayLane);
 
     if (!isMyTurn) {
-      showFeedback("상대 턴은 스킬로 방해", "skill");
+      showFeedback("상대 턴", "skill", "스킬로 방해 가능");
       return;
     }
 
@@ -883,11 +984,16 @@ export default function App() {
 
       if (heldUntilEnd) {
         applyHoldTickScore(note, rating, 1);
-        showFeedback("HOLD END", rating === "PERFECT" ? "perfect" : "good");
+        showFeedback(
+          "HOLD END",
+          rating === "PERFECT" ? "perfect" : "good",
+          `${comboRef.current}combo ${getComboMultiplierLabel(comboRef.current)}`
+        );
       } else {
         showFeedback(
           "HOLD RELEASE",
-          rating === "PERFECT" ? "perfect" : "good"
+          rating === "PERFECT" ? "perfect" : "good",
+          `${comboRef.current}combo ${getComboMultiplierLabel(comboRef.current)}`
         );
       }
 
@@ -1010,7 +1116,10 @@ export default function App() {
               applyHoldTickScore(note, rating, 1);
               showFeedback(
                 "HOLD END",
-                rating === "PERFECT" ? "perfect" : "good"
+                rating === "PERFECT" ? "perfect" : "good",
+                `${comboRef.current}combo ${getComboMultiplierLabel(
+                  comboRef.current
+                )}`
               );
               holdingNoteIdRef.current = null;
               setHoldTransfer(null);
@@ -1083,7 +1192,7 @@ export default function App() {
     });
 
     holdingNoteIdRef.current = null;
-    showFeedback("FLIP! RECATCH", "skill");
+    showFeedback("FLIP!", "skill", "RECATCH");
   }
 
   function resetTurnStateOnly() {
@@ -1118,6 +1227,17 @@ export default function App() {
     }, 350);
 
     if (turnIndex >= TOTAL_TURNS - 1) {
+      const final = {
+        A: scoreARef.current,
+        B: scoreBRef.current,
+      };
+
+      setFinalScores(final);
+
+      socket.emit("battleEnded", {
+        roomCode: roomCode || "BEAT",
+      });
+
       resetTurnStateOnly();
       stopBattleMusic();
       setPhase("result");
@@ -1227,6 +1347,54 @@ export default function App() {
     });
   }
 
+  function activateEasyModePattern(current: number) {
+    const skillStart = current + 0.35;
+    const skillEnd = current + 5.0;
+
+    updateNotes((prev) => {
+      const filtered = prev.map((note) => {
+        const isTapInSkillWindow =
+          note.type === "tap" &&
+          !note.judged &&
+          note.targetTime >= skillStart &&
+          note.targetTime <= skillEnd;
+
+        if (!isTapInSkillWindow) return note;
+
+        return {
+          ...note,
+          judged: true,
+          skippedBySkill: true,
+        };
+      });
+
+      const specialHolds: BattleNote[] = [
+        {
+          id: `easy-left-${Date.now()}`,
+          type: "hold",
+          lane: 0,
+          targetTime: skillStart + 0.8,
+          duration: 3.2,
+          judged: false,
+          skillGenerated: true,
+        },
+        {
+          id: `easy-right-${Date.now()}`,
+          type: "hold",
+          lane: 3,
+          targetTime: skillStart + 1.4,
+          duration: 3.2,
+          judged: false,
+          skillGenerated: true,
+        },
+      ];
+
+      return [...filtered, ...specialHolds].sort(
+        (a, b) => a.targetTime - b.targetTime
+      );
+    });
+  }
+
   function applySkillEffect(
     skillId: string,
     skillName: string,
@@ -1270,9 +1438,10 @@ export default function App() {
     if (skillId === "luna") {
       setActiveEffects((prev) => ({
         ...prev,
-        easyUntil: now + 10000,
+        easyUntil: now + 5000,
       }));
-      showFeedback(`${skillName}!`, "skill");
+      activateEasyModePattern(currentElapsedRef.current);
+      showFeedback(`${skillName}!`, "skill", "양쪽 롱노트 생성");
     }
 
     if (skillId === "kai") {
@@ -1315,7 +1484,7 @@ export default function App() {
     });
 
     spendMyScore(char.costRatio);
-    showFeedback("2초 뒤 발동", "skill");
+    showFeedback("2초 뒤 발동", "skill", char.skillName);
 
     socket.emit("useSkill", {
       roomCode: roomCode || "BEAT",
@@ -1388,8 +1557,15 @@ export default function App() {
 
   const progressPercent = clamp((elapsed / TURN_DURATION) * 100, 0, 100);
 
+  const resultScoreA = finalScores?.A ?? scoreA;
+  const resultScoreB = finalScores?.B ?? scoreB;
+
   const winnerSide: Side | null =
-    scoreA === scoreB ? null : scoreA > scoreB ? "A" : "B";
+    resultScoreA === resultScoreB
+      ? null
+      : resultScoreA > resultScoreB
+        ? "A"
+        : "B";
 
   const iWon = winnerSide === mySide;
 
@@ -1751,7 +1927,8 @@ export default function App() {
 
               {feedback && (
                 <div key={feedback.key} className={`feedback ${feedback.kind}`}>
-                  {feedback.text}
+                  <strong>{feedback.title}</strong>
+                  {feedback.sub && <span>{feedback.sub}</span>}
                 </div>
               )}
             </div>
@@ -1799,11 +1976,11 @@ export default function App() {
             <div className="finalScore">
               <div>
                 <small>A SCORE</small>
-                <strong>{scoreA}</strong>
+                <strong>{resultScoreA}</strong>
               </div>
               <div>
                 <small>B SCORE</small>
-                <strong>{scoreB}</strong>
+                <strong>{resultScoreB}</strong>
               </div>
             </div>
 
