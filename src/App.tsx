@@ -84,8 +84,6 @@ const GOOD_WINDOW = 0.22;
 const EASY_GOOD_WINDOW = 0.34;
 const MISS_AFTER_LINE = 0.28;
 
-const HOLD_DURATION_MIN = 1.8;
-const HOLD_DURATION_RANDOM = 0.7;
 const HOLD_TICK_INTERVAL = 0.25;
 const HOLD_RELEASE_EARLY_WINDOW = 0.22;
 const HOLD_FLIP_RECATCH_WINDOW_MS = 250;
@@ -100,15 +98,16 @@ const PUSH_FLIP_INTERVAL_MS = 3000;
 const PUSH_FLIP_COUNT = 3;
 const PUSH_DURATION_MS = PUSH_FLIP_INTERVAL_MS * PUSH_FLIP_COUNT;
 
+const MUSIC_BPM = 128;
+const MUSIC_OFFSET_SEC = 0;
+const TOTAL_BATTLE_DURATION = 120;
+const GENERATED_BEAT_VOLUME = 0.22;
+const USE_GENERATED_BEAT = false;
+
 const COMBO_MULTIPLIERS = {
   NORMAL: 1,
   TEN_PLUS: 1.5,
   TWENTY_PLUS: 2,
-};
-
-const ROUND_AUDIO_PATHS = {
-  1: "/audio/round1.mp3",
-  2: "/audio/round2.mp3",
 };
 
 const characters: Character[] = [
@@ -206,13 +205,64 @@ function seededShuffle<T>(array: T[], rng: () => number) {
   return copied;
 }
 
-function pickHoldIndexes(rng: () => number) {
+function generateBeatTimesForTurn(turnIndex: number, rng: () => number) {
+  const turnGlobalStart = turnIndex * TURN_DURATION;
+  const turnGlobalEnd = turnGlobalStart + TURN_DURATION;
+  const beatInterval = 60 / MUSIC_BPM;
+
+  const beatTimes: number[] = [];
+
+  for (
+    let globalTime = MUSIC_OFFSET_SEC;
+    globalTime < TOTAL_BATTLE_DURATION;
+    globalTime += beatInterval
+  ) {
+    if (
+      globalTime >= turnGlobalStart + 1.0 &&
+      globalTime <= turnGlobalEnd - 1.0
+    ) {
+      beatTimes.push(globalTime - turnGlobalStart);
+    }
+  }
+
+  const halfBeatTimes: number[] = [];
+
+  for (const beatTime of beatTimes) {
+    const halfBeat = beatTime + beatInterval / 2;
+
+    if (halfBeat >= 1.0 && halfBeat <= TURN_DURATION - 1.0) {
+      halfBeatTimes.push(halfBeat);
+    }
+  }
+
+  const candidates = seededShuffle([...beatTimes, ...halfBeatTimes], rng).sort(
+    (a, b) => a - b
+  );
+
+  const picked: number[] = [];
+
+  for (const time of candidates) {
+    const tooClose = picked.some(
+      (pickedTime) => Math.abs(pickedTime - time) < 0.22
+    );
+
+    if (!tooClose) {
+      picked.push(time);
+    }
+
+    if (picked.length >= NOTE_COUNT) break;
+  }
+
+  return picked.sort((a, b) => a - b);
+}
+
+function pickHoldIndexesFromTimes(times: number[], rng: () => number) {
   const picked: number[] = [];
 
   const candidates = seededShuffle(
-    Array.from({ length: NOTE_COUNT }, (_, index) => index).filter(
-      (index) => index >= 4 && index <= NOTE_COUNT - 5
-    ),
+    times
+      .map((_, index) => index)
+      .filter((index) => index >= 3 && index <= times.length - 4),
     rng
   );
 
@@ -288,26 +338,35 @@ function generateNotes(
   roomCode: string,
   firstSide: Side | null
 ) {
-  const seed = `${roomCode || "BEAT"}-${firstSide || "A"}-${turnIndex}`;
+  const seed = `${roomCode || "BEAT"}-${
+    firstSide || "A"
+  }-${turnIndex}-${MUSIC_BPM}`;
   const rng = createRng(seed);
 
-  const holdIndexes = pickHoldIndexes(rng);
+  const beatTimes = generateBeatTimesForTurn(turnIndex, rng);
+
+  while (beatTimes.length < NOTE_COUNT) {
+    const index = beatTimes.length;
+    const fallbackTime =
+      1.2 + index * ((TURN_DURATION - 2.6) / (NOTE_COUNT - 1));
+    beatTimes.push(fallbackTime);
+  }
+
+  const finalTimes = beatTimes.slice(0, NOTE_COUNT).sort((a, b) => a - b);
+
+  const holdIndexes = pickHoldIndexesFromTimes(finalTimes, rng);
   const holdIndexSet = new Set(holdIndexes);
 
   const holds: BattleNote[] = [];
   const notes: BattleNote[] = [];
 
-  for (let index = 0; index < NOTE_COUNT; index += 1) {
+  for (let index = 0; index < finalTimes.length; index += 1) {
     const type: NoteType = holdIndexSet.has(index) ? "hold" : "tap";
-
-    const baseTime = 1.2 + index * ((TURN_DURATION - 2.6) / (NOTE_COUNT - 1));
-    const jitter =
-      type === "tap" ? (rng() - 0.5) * 0.12 : (rng() - 0.5) * 0.04;
-
-    const targetTime = clamp(baseTime + jitter, 1.1, TURN_DURATION - 1.1);
+    const targetTime = finalTimes[index];
 
     if (type === "hold") {
-      const duration = HOLD_DURATION_MIN + rng() * HOLD_DURATION_RANDOM;
+      const beatInterval = 60 / MUSIC_BPM;
+      const duration = beatInterval * (rng() > 0.5 ? 3 : 2) + rng() * 0.15;
       const lane = pickSafeLaneForHold(targetTime, duration, holds, rng);
 
       const holdNote: BattleNote = {
@@ -358,6 +417,116 @@ function getComboMultiplierLabel(comboValue: number) {
   return "x1.0";
 }
 
+function createBeep(
+  context: AudioContext,
+  time: number,
+  frequency: number,
+  duration: number,
+  volume: number
+) {
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+
+  oscillator.type = "sine";
+  oscillator.frequency.setValueAtTime(frequency, time);
+
+  gain.gain.setValueAtTime(0.0001, time);
+  gain.gain.exponentialRampToValueAtTime(volume, time + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, time + duration);
+
+  oscillator.connect(gain);
+  gain.connect(context.destination);
+
+  oscillator.start(time);
+  oscillator.stop(time + duration + 0.02);
+}
+
+function createKick(context: AudioContext, time: number) {
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+
+  oscillator.type = "sine";
+  oscillator.frequency.setValueAtTime(130, time);
+  oscillator.frequency.exponentialRampToValueAtTime(45, time + 0.16);
+
+  gain.gain.setValueAtTime(0.0001, time);
+  gain.gain.exponentialRampToValueAtTime(
+    GENERATED_BEAT_VOLUME * 1.2,
+    time + 0.01
+  );
+  gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.18);
+
+  oscillator.connect(gain);
+  gain.connect(context.destination);
+
+  oscillator.start(time);
+  oscillator.stop(time + 0.2);
+}
+
+function createHat(context: AudioContext, time: number) {
+  const bufferSize = Math.floor(context.sampleRate * 0.04);
+  const buffer = context.createBuffer(1, bufferSize, context.sampleRate);
+  const data = buffer.getChannelData(0);
+
+  for (let i = 0; i < bufferSize; i += 1) {
+    data[i] = Math.random() * 2 - 1;
+  }
+
+  const noise = context.createBufferSource();
+  const filter = context.createBiquadFilter();
+  const gain = context.createGain();
+
+  noise.buffer = buffer;
+  filter.type = "highpass";
+  filter.frequency.setValueAtTime(7000, time);
+
+  gain.gain.setValueAtTime(0.0001, time);
+  gain.gain.exponentialRampToValueAtTime(
+    GENERATED_BEAT_VOLUME * 0.28,
+    time + 0.005
+  );
+  gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.04);
+
+  noise.connect(filter);
+  filter.connect(gain);
+  gain.connect(context.destination);
+
+  noise.start(time);
+  noise.stop(time + 0.05);
+}
+
+function createSnare(context: AudioContext, time: number) {
+  const bufferSize = Math.floor(context.sampleRate * 0.09);
+  const buffer = context.createBuffer(1, bufferSize, context.sampleRate);
+  const data = buffer.getChannelData(0);
+
+  for (let i = 0; i < bufferSize; i += 1) {
+    data[i] = Math.random() * 2 - 1;
+  }
+
+  const noise = context.createBufferSource();
+  const filter = context.createBiquadFilter();
+  const gain = context.createGain();
+
+  noise.buffer = buffer;
+  filter.type = "bandpass";
+  filter.frequency.setValueAtTime(1800, time);
+
+  gain.gain.setValueAtTime(0.0001, time);
+  gain.gain.exponentialRampToValueAtTime(
+    GENERATED_BEAT_VOLUME * 0.8,
+    time + 0.01
+  );
+  gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.11);
+
+  noise.connect(filter);
+  filter.connect(gain);
+  gain.connect(context.destination);
+
+  noise.start(time);
+  noise.stop(time + 0.12);
+}
+
 export default function App() {
   const [phase, setPhase] = useState<Phase>("start");
   const [roomCode, setRoomCode] = useState("");
@@ -396,6 +565,9 @@ export default function App() {
 
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [holdTransfer, setHoldTransfer] = useState<HoldTransfer | null>(null);
+  const [pressedLanes, setPressedLanes] = useState<boolean[]>(
+    Array.from({ length: LANE_COUNT }, () => false)
+  );
 
   const laneAreaRef = useRef<HTMLDivElement | null>(null);
   const notesRef = useRef<BattleNote[]>([]);
@@ -408,9 +580,14 @@ export default function App() {
   const phaseRef = useRef<Phase>("start");
   const mySideRef = useRef<Side>("A");
   const holdingNoteIdRef = useRef<string | null>(null);
+  const activePointerLanesRef = useRef<Map<number, number>>(new Map());
+  const holdPointerNoteIdsRef = useRef<Map<number, string>>(new Map());
   const lastFlipCountRef = useRef(0);
   const advancingRef = useRef(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const beatTimerRef = useRef<number | null>(null);
+  const beatStartTimeRef = useRef(0);
 
   const selectedTeam = useMemo(
     () =>
@@ -594,42 +771,115 @@ export default function App() {
 
   useEffect(() => {
     if (phase !== "battle") {
-      audioRef.current?.pause();
-      audioRef.current = null;
+      stopGeneratedBeat();
       return;
     }
 
-    const audioPath = ROUND_AUDIO_PATHS[roundNumber as 1 | 2];
-    const audio = new Audio(audioPath);
-    audio.volume = 0.72;
-    audio.loop = false;
+    if (!USE_GENERATED_BEAT) {
+      stopGeneratedBeat();
+      return;
+    }
 
-    const turnOffset = turnIndex % 2 === 0 ? 0 : TURN_DURATION;
     const currentTurnElapsed = Math.max(
       0,
       (performance.now() - turnStartMs) / 1000
     );
-    const musicStartTime = clamp(turnOffset + currentTurnElapsed, 0, 59.5);
 
-    audioRef.current?.pause();
-    audioRef.current = audio;
+    const globalOffsetSec = clamp(
+      turnIndex * TURN_DURATION + currentTurnElapsed,
+      0,
+      TOTAL_BATTLE_DURATION - 0.5
+    );
 
-    const playAudio = () => {
-      audio.currentTime = musicStartTime;
-      audio.play().catch(() => {});
-    };
-
-    if (audio.readyState >= 1) {
-      playAudio();
-    } else {
-      audio.addEventListener("loadedmetadata", playAudio, { once: true });
-    }
+    startGeneratedBeat(globalOffsetSec);
 
     return () => {
-      audio.pause();
-      audio.removeEventListener("loadedmetadata", playAudio);
+      stopGeneratedBeat();
     };
-  }, [phase, roundNumber, turnIndex, turnStartMs]);
+  }, [phase, turnIndex, turnStartMs]);
+
+  function stopGeneratedBeat() {
+    if (beatTimerRef.current !== null) {
+      window.clearInterval(beatTimerRef.current);
+      beatTimerRef.current = null;
+    }
+  }
+
+  function startGeneratedBeat(globalOffsetSec: number) {
+    stopGeneratedBeat();
+
+    const AudioContextClass =
+      window.AudioContext ||
+      (
+        window as unknown as {
+          webkitAudioContext: typeof AudioContext;
+        }
+      ).webkitAudioContext;
+
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioContextClass();
+    }
+
+    const context = audioContextRef.current;
+
+    if (context.state === "suspended") {
+      context.resume().catch(() => {});
+    }
+
+    const beatInterval = 60 / MUSIC_BPM;
+    const lookAhead = 0.12;
+
+    beatStartTimeRef.current = context.currentTime - globalOffsetSec;
+
+    let scheduledUntil = globalOffsetSec;
+
+    const schedule = () => {
+      const currentGlobalTime = context.currentTime - beatStartTimeRef.current;
+      const scheduleUntil = currentGlobalTime + lookAhead;
+
+      while (
+        scheduledUntil < scheduleUntil &&
+        scheduledUntil < TOTAL_BATTLE_DURATION
+      ) {
+        const beatNumber = Math.round(
+          (scheduledUntil - MUSIC_OFFSET_SEC) / beatInterval
+        );
+        const beatTime = MUSIC_OFFSET_SEC + beatNumber * beatInterval;
+
+        if (beatTime >= 0 && beatTime >= currentGlobalTime - 0.02) {
+          const audioTime = beatStartTimeRef.current + beatTime;
+          const beatInBar = ((beatNumber % 4) + 4) % 4;
+
+          if (beatInBar === 0) {
+            createKick(context, audioTime);
+            createBeep(
+              context,
+              audioTime,
+              220,
+              0.06,
+              GENERATED_BEAT_VOLUME * 0.35
+            );
+          }
+
+          if (beatInBar === 1 || beatInBar === 3) {
+            createSnare(context, audioTime);
+          }
+
+          createHat(context, audioTime);
+
+          const halfBeatTime = audioTime + beatInterval / 2;
+          if (halfBeatTime < beatStartTimeRef.current + TOTAL_BATTLE_DURATION) {
+            createHat(context, halfBeatTime);
+          }
+        }
+
+        scheduledUntil += beatInterval;
+      }
+    };
+
+    schedule();
+    beatTimerRef.current = window.setInterval(schedule, 25);
+  }
 
   function getPushFlipCount(timeMs: number, startedAt: number, until: number) {
     if (!startedAt || timeMs >= until) return 0;
@@ -707,6 +957,25 @@ export default function App() {
     const x = clamp(clientX - rect.left, 0, rect.width - 1);
 
     return clamp(Math.floor((x / rect.width) * LANE_COUNT), 0, LANE_COUNT - 1);
+  }
+
+  function refreshPressedLanes() {
+    const activeLanes = Array.from(activePointerLanesRef.current.values());
+
+    setPressedLanes(
+      Array.from({ length: LANE_COUNT }, (_, lane) => activeLanes.includes(lane))
+    );
+  }
+
+  function pressLane(pointerId: number, lane: number) {
+    activePointerLanesRef.current.set(pointerId, lane);
+    refreshPressedLanes();
+  }
+
+  function releasePointer(pointerId: number) {
+    activePointerLanesRef.current.delete(pointerId);
+    holdPointerNoteIdsRef.current.delete(pointerId);
+    refreshPressedLanes();
   }
 
   function getJudgeWindow() {
@@ -939,14 +1208,20 @@ export default function App() {
 
     event.currentTarget.setPointerCapture(event.pointerId);
 
+    const displayLane = getLaneFromPointer(event.clientX);
+    pressLane(event.pointerId, displayLane);
+
     if (!isMyTurn) {
       showFeedback("상대 턴은 스킬로 방해", "skill");
       return;
     }
 
-    const displayLane = getLaneFromPointer(event.clientX);
+    const transferNoteId = holdTransfer?.noteId;
 
-    if (recatchHoldAfterFlip(displayLane)) {
+    if (holdTransfer && recatchHoldAfterFlip(displayLane)) {
+      if (transferNoteId) {
+        holdPointerNoteIdsRef.current.set(event.pointerId, transferNoteId);
+      }
       return;
     }
 
@@ -959,6 +1234,8 @@ export default function App() {
 
     if (candidate.type === "hold") {
       holdingNoteIdRef.current = candidate.id;
+      holdPointerNoteIdsRef.current.set(event.pointerId, candidate.id);
+
       markNoteHolding(candidate.id, rating, current);
       applyHoldTickScore(candidate, rating, 1);
       return;
@@ -969,10 +1246,19 @@ export default function App() {
 
   function handlePointerMove(event: PointerEvent<HTMLDivElement>) {
     if (phase !== "battle") return;
-    if (!isMyTurn) return;
 
     const displayLane = getLaneFromPointer(event.clientX);
-    recatchHoldAfterFlip(displayLane);
+    pressLane(event.pointerId, displayLane);
+
+    if (!isMyTurn) return;
+
+    const transferNoteId = holdTransfer?.noteId;
+
+    if (holdTransfer && recatchHoldAfterFlip(displayLane)) {
+      if (transferNoteId) {
+        holdPointerNoteIdsRef.current.set(event.pointerId, transferNoteId);
+      }
+    }
   }
 
   function handlePointerUp(event?: PointerEvent<HTMLDivElement>) {
@@ -980,11 +1266,17 @@ export default function App() {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
 
-    if (!isMyTurn) return;
+    if (!event) return;
 
-    const holdingId = holdingNoteIdRef.current;
+    const holdingId = holdPointerNoteIdsRef.current.get(event.pointerId);
+
+    if (!isMyTurn) {
+      releasePointer(event.pointerId);
+      return;
+    }
 
     if (!holdingId) {
+      releasePointer(event.pointerId);
       return;
     }
 
@@ -1013,10 +1305,19 @@ export default function App() {
       }
 
       markNoteJudged(note.id);
-      emitNoteResult(`${note.id}-release-${Date.now()}`, rating, 0, comboRef.current);
+      emitNoteResult(
+        `${note.id}-release-${Date.now()}`,
+        rating,
+        0,
+        comboRef.current
+      );
     }
 
-    holdingNoteIdRef.current = null;
+    if (holdingNoteIdRef.current === holdingId) {
+      holdingNoteIdRef.current = null;
+    }
+
+    releasePointer(event.pointerId);
     setHoldTransfer(null);
   }
 
@@ -1217,9 +1518,12 @@ export default function App() {
   function resetTurnStateOnly() {
     processedNoteIdsRef.current.clear();
     holdingNoteIdRef.current = null;
+    activePointerLanesRef.current.clear();
+    holdPointerNoteIdsRef.current.clear();
     lastFlipCountRef.current = 0;
     comboRef.current = 0;
 
+    setPressedLanes(Array.from({ length: LANE_COUNT }, () => false));
     setHoldTransfer(null);
     setCombo(0);
 
@@ -1244,6 +1548,7 @@ export default function App() {
 
     if (turnIndex >= TOTAL_TURNS - 1) {
       resetTurnStateOnly();
+      stopGeneratedBeat();
       setPhase("result");
       return;
     }
@@ -1799,7 +2104,6 @@ export default function App() {
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
               onPointerCancel={handlePointerUp}
-              onPointerLeave={handlePointerUp}
             >
               {[0, 1, 2, 3].map((lane) => (
                 <div key={lane} className="lane">
@@ -1813,6 +2117,15 @@ export default function App() {
 
               <div className="missZone">
                 <span>MISS</span>
+              </div>
+
+              <div className="inputButtons" aria-hidden="true">
+                {pressedLanes.map((pressed, lane) => (
+                  <div
+                    key={lane}
+                    className={`laneInputButton ${pressed ? "pressed" : ""}`}
+                  />
+                ))}
               </div>
 
               {isSpectating && (
