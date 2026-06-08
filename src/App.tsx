@@ -241,50 +241,107 @@ function generateNotesFromMusicChart(turnIndex: number) {
   const globalStart = turnIndex * TURN_DURATION;
   const globalEnd = globalStart + TURN_DURATION;
 
-  const chartNotes = (MUSIC_CHART as MusicChartNote[])
+  const chartNotes: BattleNote[] = (MUSIC_CHART as MusicChartNote[])
     .filter(
       (chartNote) =>
-        chartNote.time >= globalStart + 0.8 &&
-        chartNote.time < globalEnd - 0.6
+        chartNote.time >= globalStart + 0.75 &&
+        chartNote.time <= globalEnd - 0.55
     )
-    .map((chartNote, index) => ({
-      id: `turn-${turnIndex}-chart-${index}-${chartNote.type}`,
-      type: chartNote.type,
-      lane: clamp(chartNote.lane, 0, LANE_COUNT - 1),
-      targetTime: chartNote.time - globalStart,
-      duration: chartNote.type === "hold" ? chartNote.duration ?? 1.1 : 0,
-      judged: false,
-    }));
+    .map((chartNote) => {
+      const localTime = Number((chartNote.time - globalStart).toFixed(3));
+      const lane = clamp(chartNote.lane, 0, LANE_COUNT - 1);
+
+      return {
+        id: `turn-${turnIndex}-chart-${localTime.toFixed(3)}-${lane}-${chartNote.type}`,
+        type: chartNote.type,
+        lane,
+        targetTime: localTime,
+        duration: chartNote.type === "hold" ? chartNote.duration ?? 1.05 : 0,
+        judged: false,
+      };
+    });
 
   const filledNotes: BattleNote[] = [...chartNotes];
 
-  let cursor = 1.1;
-  let laneSeed = turnIndex;
+  function hasNearbyNote(time: number) {
+    return filledNotes.some((note) => Math.abs(note.targetTime - time) < 0.34);
+  }
 
-  while (cursor <= TURN_DURATION - 0.9) {
-    const hasNearbyNote = filledNotes.some(
-      (note) => Math.abs(note.targetTime - cursor) < 0.55
+  function hasLaneConflict(lane: number, time: number) {
+    return filledNotes.some((note) => {
+      if (note.lane !== lane) return false;
+
+      const start = note.targetTime;
+      const end =
+        note.type === "hold" ? note.targetTime + note.duration : note.targetTime;
+
+      return time >= start - 0.38 && time <= end + 0.38;
+    });
+  }
+
+  function pickDeterministicLane(time: number) {
+    const base = Math.floor(time * 100) + turnIndex * 7;
+
+    const laneOrder = [
+      base % LANE_COUNT,
+      (base + 2) % LANE_COUNT,
+      (base + 1) % LANE_COUNT,
+      (base + 3) % LANE_COUNT,
+    ];
+
+    return (
+      laneOrder.find((candidateLane) => !hasLaneConflict(candidateLane, time)) ??
+      laneOrder[0]
     );
+  }
 
-    if (!hasNearbyNote) {
-      const lane = laneSeed % LANE_COUNT;
+  // 30초 턴 전체에 고정 보충 노트 생성
+  // 0.58초 간격이면 한 턴당 약 48~50개 흐름이 생김
+  let cursor = 1.0;
+
+  while (cursor <= TURN_DURATION - 0.75) {
+    const time = Number(cursor.toFixed(3));
+
+    if (!hasNearbyNote(time)) {
+      const lane = pickDeterministicLane(time);
 
       filledNotes.push({
-        id: `turn-${turnIndex}-fill-${cursor.toFixed(2)}-${lane}`,
+        id: `turn-${turnIndex}-fill-${time.toFixed(3)}-${lane}`,
         type: "tap",
         lane,
-        targetTime: cursor,
+        targetTime: time,
         duration: 0,
         judged: false,
       });
-
-      laneSeed += 1;
     }
 
-    cursor += 0.78;
+    cursor += 0.58;
   }
 
-  return filledNotes.sort((a, b) => a.targetTime - b.targetTime);
+  // 턴 끝부분이 비지 않게 마지막 보강 노트 추가
+  const endFillTimes = [26.8, 27.5, 28.2, 28.9, 29.35];
+
+  for (const endTime of endFillTimes) {
+    const time = Number(endTime.toFixed(3));
+
+    if (!hasNearbyNote(time)) {
+      const lane = pickDeterministicLane(time);
+
+      filledNotes.push({
+        id: `turn-${turnIndex}-endfill-${time.toFixed(3)}-${lane}`,
+        type: "tap",
+        lane,
+        targetTime: time,
+        duration: 0,
+        judged: false,
+      });
+    }
+  }
+
+  return filledNotes.sort((a, b) => {
+    if (a.targetTime !== b.targetTime) return a.targetTime - b.targetTime;
+    return a.lane - b.lane;
+  });
 }
 
 export default function App() {
