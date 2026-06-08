@@ -1341,3 +1341,44 @@ button {
     width: 44px;
   }
 }
+/* Battle cleanup update */
+.judgeLine span,
+.missZone span,
+.lane span {
+  display: none !important;
+}
+
+.battleBottom {
+  display: none !important;
+}
+
+.laneArea {
+  flex: 1 1 auto;
+  min-height: 330px;
+}
+
+.inputButtons {
+  bottom: 10px;
+}
+
+.missZone {
+  top: 92%;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 64, 64, 0.035),
+    rgba(255, 64, 64, 0.09)
+  );
+  border-top: 1px dashed rgba(255, 111, 111, 0.22);
+}
+
+@media (max-height: 760px) {
+  .laneArea {
+    min-height: 300px;
+  }
+}
+
+@media (max-height: 650px) {
+  .laneArea {
+    min-height: 270px;
+  }
+}
