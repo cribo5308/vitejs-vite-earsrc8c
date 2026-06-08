@@ -18,6 +18,7 @@ body {
     linear-gradient(160deg, #090912, #17142a 48%, #07070b);
   color: white;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 button,
@@ -31,19 +32,28 @@ button {
 
 .app {
   width: 100vw;
+  height: 100vh;
   height: 100dvh;
   display: grid;
   place-items: center;
-  padding: 10px;
+  padding:
+    max(8px, env(safe-area-inset-top))
+    max(8px, env(safe-area-inset-right))
+    max(8px, env(safe-area-inset-bottom))
+    max(8px, env(safe-area-inset-left));
   overflow: hidden;
 }
 
 .phone {
   width: min(100%, 430px);
-  height: min(calc(100dvh - 20px), 930px);
+  height: min(100%, 930px);
+  max-height: calc(
+    100dvh - max(16px, env(safe-area-inset-top)) -
+      max(16px, env(safe-area-inset-bottom))
+  );
   aspect-ratio: 9 / 19.5;
   max-width: calc((100dvh - 20px) * 9 / 19.5);
-  border-radius: 34px;
+  border-radius: clamp(22px, 7vw, 34px);
   overflow: hidden;
   background: #0b0b14;
   box-shadow:
@@ -55,7 +65,7 @@ button {
 .screen {
   width: 100%;
   height: 100%;
-  padding: 22px;
+  padding: clamp(12px, 4vw, 22px);
   position: relative;
   overflow: hidden;
 }
@@ -133,7 +143,11 @@ button {
 
 .secondaryButton {
   color: white;
-  background: linear-gradient(135deg, rgba(90, 236, 255, 0.95), rgba(66, 100, 255, 0.95));
+  background: linear-gradient(
+    135deg,
+    rgba(90, 236, 255, 0.95),
+    rgba(66, 100, 255, 0.95)
+  );
   box-shadow: 0 16px 34px rgba(66, 197, 255, 0.22);
 }
 
@@ -151,10 +165,10 @@ button {
 
 .bottomButton {
   position: absolute;
-  left: 22px;
-  right: 22px;
-  bottom: 22px;
-  width: calc(100% - 44px);
+  left: clamp(12px, 4vw, 22px);
+  right: clamp(12px, 4vw, 22px);
+  bottom: calc(clamp(12px, 4vw, 22px) + env(safe-area-inset-bottom));
+  width: auto;
 }
 
 .eyebrow {
@@ -503,7 +517,8 @@ button {
 }
 
 .battleScreen {
-  padding: 12px;
+  padding: clamp(8px, 2.8vw, 12px);
+  padding-bottom: calc(clamp(8px, 2.8vw, 12px) + env(safe-area-inset-bottom));
   background:
     radial-gradient(circle at center 6%, rgba(124, 92, 255, 0.24), transparent 28%),
     linear-gradient(180deg, #111126, #050509);
@@ -676,10 +691,10 @@ button {
 
 .laneArea {
   position: relative;
-  flex: 1;
-  min-height: 0;
+  flex: 1 1 auto;
+  min-height: 240px;
   height: auto;
-  border-radius: 26px;
+  border-radius: clamp(18px, 5vw, 26px);
   overflow: hidden;
   touch-action: none;
   user-select: none;
@@ -775,7 +790,11 @@ button {
   top: 92%;
   bottom: 0;
   z-index: 1;
-  background: linear-gradient(180deg, rgba(255, 64, 64, 0.08), rgba(255, 64, 64, 0.18));
+  background: linear-gradient(
+    180deg,
+    rgba(255, 64, 64, 0.08),
+    rgba(255, 64, 64, 0.18)
+  );
   border-top: 1px dashed rgba(255, 111, 111, 0.38);
 }
 
@@ -1153,92 +1172,172 @@ button {
 }
 
 @media (max-height: 760px) {
-  .screen {
-    padding: 14px;
-  }
-
-  .battleScreen {
-    padding: 10px;
+  .teamLine {
+    gap: 6px;
   }
 
   .battleChar {
-    min-height: 54px;
-    padding: 7px;
+    min-height: 50px;
+    padding: 6px 7px;
+    border-radius: 15px;
   }
 
   .battleChar span {
-    font-size: 21px;
+    font-size: 19px;
   }
 
   .battleChar b {
-    font-size: 12px;
+    font-size: 11px;
   }
 
   .battleChar small {
-    font-size: 10px;
+    font-size: 9px;
+    margin-top: 1px;
   }
 
   .scoreBoard {
     padding: 7px;
     margin: 6px 0;
+    border-radius: 18px;
   }
 
   .scoreBoard strong {
-    font-size: 18px;
+    font-size: 17px;
+  }
+
+  .scoreBoard small {
+    font-size: 9px;
   }
 
   .roundInfo b {
-    font-size: 12px;
+    font-size: 11px;
+  }
+
+  .roundInfo span {
+    font-size: 10px;
   }
 
   .statusLine {
-    margin-bottom: 6px;
+    gap: 4px;
+    margin-bottom: 5px;
   }
 
   .statusLine span {
     padding: 5px 2px;
-    font-size: 9px;
+    font-size: 8.5px;
   }
 
   .turnProgress {
+    height: 5px;
     margin-bottom: 6px;
   }
 
   .battleBottom {
-    height: 42px;
+    height: 40px;
+    padding-top: 6px;
+    grid-template-columns: 76px 1fr;
   }
 
   .battleBottom div {
-    height: 36px;
+    height: 34px;
+  }
+
+  .battleBottom strong {
+    font-size: 15px;
+  }
+
+  .comboMultiplier {
+    font-size: 9px;
   }
 
   .battleBottom p {
+    font-size: 9.5px;
+  }
+
+  .tapNote {
+    width: 52px;
+    height: 30px;
+    font-size: 11px;
+  }
+
+  .holdNote {
+    width: 46px;
+    min-height: 120px;
     font-size: 10px;
   }
 
-  .podiumScene {
-    height: 210px;
-  }
-
-  .podium {
-    height: 178px;
+  .feedback {
+    font-size: 26px;
   }
 }
 
 @media (max-height: 650px) {
-  .battleChar {
-    min-height: 48px;
+  .battleScreen {
+    padding: 7px;
+    padding-bottom: calc(7px + env(safe-area-inset-bottom));
   }
 
-  .scoreBoard strong {
-    font-size: 16px;
+  .teamLine {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .battleChar {
+    min-height: 44px;
+  }
+
+  .scoreBoard {
+    grid-template-columns: 0.9fr 1.2fr 0.9fr;
+  }
+
+  .statusLine span:not(:first-child) {
+    display: none;
+  }
+
+  .statusLine span:first-child {
+    flex: 1;
+  }
+
+  .battleBottom {
+    grid-template-columns: 72px 1fr;
+    height: 36px;
   }
 
   .battleBottom p {
     display: none;
   }
 
-  .battleBottom {
-    grid-template-columns: 1fr;
+  .laneArea {
+    min-height: 220px;
+  }
+
+  .judgeLine span {
+    top: -20px;
+    font-size: 9px;
+  }
+}
+
+@media (max-width: 380px) {
+  .scoreBoard {
+    gap: 5px;
+  }
+
+  .scoreBoard strong {
+    font-size: 16px;
+  }
+
+  .roundInfo b {
+    font-size: 10px;
+  }
+
+  .battleChar small {
+    max-width: 100%;
+  }
+
+  .tapNote {
+    width: 48px;
+  }
+
+  .holdNote {
+    width: 44px;
   }
 }
