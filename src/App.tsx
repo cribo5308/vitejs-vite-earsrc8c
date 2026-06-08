@@ -2105,9 +2105,12 @@ export default function App() {
               onPointerUp={handlePointerUp}
               onPointerCancel={handlePointerUp}
             >
-              {[0, 1, 2, 3].map((lane) => (
-                <div key={lane} className="lane" />
-              ))}
+             {[0, 1, 2, 3].map((lane) => (
+  <div
+    key={lane}
+    className={`lane ${pressedLanes[lane] ? "pressed" : ""}`}
+  />
+))}
 
               <div className="judgeLine" />
 
