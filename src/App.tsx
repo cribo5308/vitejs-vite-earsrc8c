@@ -75,7 +75,7 @@ const LANE_COUNT = 4;
 const NOTE_COUNT = 50;
 const HOLD_COUNT = 10;
 
-const FALL_DURATION = 1.8;
+const FALL_DURATION = 2.35;
 const NOTE_START_TOP = -12;
 const JUDGE_LINE_TOP = 82;
 
@@ -2106,18 +2106,12 @@ export default function App() {
               onPointerCancel={handlePointerUp}
             >
               {[0, 1, 2, 3].map((lane) => (
-                <div key={lane} className="lane">
-                  <span>{lane + 1}</span>
-                </div>
+                <div key={lane} className="lane" />
               ))}
 
-              <div className="judgeLine">
-                <span>판정선</span>
-              </div>
+              <div className="judgeLine" />
 
-              <div className="missZone">
-                <span>MISS</span>
-              </div>
+              <div className="missZone" />
 
               <div className="inputButtons" aria-hidden="true">
                 {pressedLanes.map((pressed, lane) => (
@@ -2193,26 +2187,6 @@ export default function App() {
                   {feedback.text}
                 </div>
               )}
-            </div>
-
-            <div className="battleBottom">
-              <div>
-                <small>COMBO</small>
-                <strong>{combo}</strong>
-                <em className="comboMultiplier">
-                  {getComboMultiplierLabel(combo)}
-                </em>
-              </div>
-
-              <p>
-                {isMyTurn ? (
-                  <>내 턴이야. 피아노타일처럼 직접 눌러.</>
-                ) : (
-                  <>
-                    상대 턴이야. <b>방해기술</b>만 사용 가능.
-                  </>
-                )}
-              </p>
             </div>
 
             {pendingSkill && (
