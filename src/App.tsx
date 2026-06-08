@@ -2116,15 +2116,6 @@ export default function App() {
 
               <div className="missZone" />
 
-              <div className="inputButtons" aria-hidden="true">
-                {pressedLanes.map((pressed, lane) => (
-                  <div
-                    key={lane}
-                    className={`laneInputButton ${pressed ? "pressed" : ""}`}
-                  />
-                ))}
-              </div>
-
               {isSpectating && (
                 <div className="spectatorOverlay">
                   <strong>상대 플레이 관전 중</strong>
