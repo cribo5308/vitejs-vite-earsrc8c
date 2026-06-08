@@ -65,7 +65,8 @@ type PendingSkill = {
 };
 
 type Feedback = {
-  text: string;
+  title: string;
+  sub?: string;
   kind: "perfect" | "good" | "miss" | "skill";
   key: number;
 };
