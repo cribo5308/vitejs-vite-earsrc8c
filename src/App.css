@@ -1706,3 +1706,61 @@ button {
 .feedback.miss span {
   color: #ffb4b4;
 }
+/* ===== FINAL: remove purple pressed lane box completely ===== */
+
+/* 누른 라인 전체 배경 완전 제거 */
+.lane.pressed {
+  background: transparent !important;
+  box-shadow: none !important;
+  filter: none !important;
+}
+
+/* 기존에 생기던 큰 보라색 박스 제거 */
+.lane.pressed::after {
+  content: none !important;
+  display: none !important;
+}
+
+/* 위쪽에 생기는 보라색 직사각형 잔상 제거 */
+.lane.pressed::before {
+  content: "" !important;
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  top: 80.5%;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(160, 255, 255, 0.35);
+  box-shadow:
+    0 0 8px rgba(120, 240, 255, 0.45),
+    0 0 18px rgba(180, 110, 255, 0.28);
+  filter: blur(1px);
+  pointer-events: none;
+}
+
+/* 판정선 아래 터치 구간은 전체적으로 일정한 보라색만 유지 */
+.missZone {
+  top: 82% !important;
+  bottom: 0 !important;
+  background: linear-gradient(
+    180deg,
+    rgba(80, 48, 150, 0.14) 0%,
+    rgba(105, 58, 185, 0.18) 55%,
+    rgba(130, 70, 220, 0.22) 100%
+  ) !important;
+  border-top: none !important;
+  box-shadow:
+    inset 0 10px 24px rgba(160, 120, 255, 0.06),
+    inset 0 -14px 30px rgba(50, 18, 95, 0.28) !important;
+  pointer-events: none !important;
+}
+
+/* 혹시 다른 CSS에서 lane 배경을 다시 넣는 것 방지 */
+.lane,
+.lane:hover,
+.lane:active,
+.lane.pressed,
+.lane.pressed:hover,
+.lane.pressed:active {
+  background-color: transparent !important;
+}
