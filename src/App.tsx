@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent } from "react";
 import { socket, type ServerRoomState } from "./socket";
+import { MUSIC_CHART } from "./musicChart";
 import "./App.css";
 
 type Phase =
@@ -27,6 +28,13 @@ type Character = {
   skillTarget: SkillTarget;
   costRatio: number;
   desc: string;
+};
+
+type MusicChartNote = {
+  time: number;
+  lane: number;
+  type: NoteType;
+  duration?: number;
 };
 
 type BattleNote = {
@@ -72,9 +80,6 @@ const TURN_DURATION = 30;
 const TOTAL_TURNS = 4;
 const LANE_COUNT = 4;
 
-const NOTE_COUNT = 50;
-const HOLD_COUNT = 10;
-
 const FALL_DURATION = 2.35;
 const NOTE_START_TOP = -12;
 const JUDGE_LINE_TOP = 82;
@@ -98,11 +103,8 @@ const PUSH_FLIP_INTERVAL_MS = 3000;
 const PUSH_FLIP_COUNT = 3;
 const PUSH_DURATION_MS = PUSH_FLIP_INTERVAL_MS * PUSH_FLIP_COUNT;
 
-const MUSIC_BPM = 128;
-const MUSIC_OFFSET_SEC = 0;
 const TOTAL_BATTLE_DURATION = 120;
-const GENERATED_BEAT_VOLUME = 0.22;
-const USE_GENERATED_BEAT = false;
+const MUSIC_URL = "/audio/battle.mp3";
 
 const COMBO_MULTIPLIERS = {
   NORMAL: 1,
@@ -171,233 +173,6 @@ function otherSide(side: Side): Side {
   return side === "A" ? "B" : "A";
 }
 
-function hashSeed(seed: string) {
-  let hash = 2166136261;
-
-  for (let i = 0; i < seed.length; i += 1) {
-    hash ^= seed.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-
-  return hash >>> 0;
-}
-
-function createRng(seed: string) {
-  let state = hashSeed(seed);
-
-  return () => {
-    state += 0x6d2b79f5;
-    let t = state;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function seededShuffle<T>(array: T[], rng: () => number) {
-  const copied = [...array];
-
-  for (let i = copied.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(rng() * (i + 1));
-    [copied[i], copied[j]] = [copied[j], copied[i]];
-  }
-
-  return copied;
-}
-
-function generateBeatTimesForTurn(turnIndex: number, rng: () => number) {
-  const turnGlobalStart = turnIndex * TURN_DURATION;
-  const turnGlobalEnd = turnGlobalStart + TURN_DURATION;
-  const beatInterval = 60 / MUSIC_BPM;
-
-  const beatTimes: number[] = [];
-
-  for (
-    let globalTime = MUSIC_OFFSET_SEC;
-    globalTime < TOTAL_BATTLE_DURATION;
-    globalTime += beatInterval
-  ) {
-    if (
-      globalTime >= turnGlobalStart + 1.0 &&
-      globalTime <= turnGlobalEnd - 1.0
-    ) {
-      beatTimes.push(globalTime - turnGlobalStart);
-    }
-  }
-
-  const halfBeatTimes: number[] = [];
-
-  for (const beatTime of beatTimes) {
-    const halfBeat = beatTime + beatInterval / 2;
-
-    if (halfBeat >= 1.0 && halfBeat <= TURN_DURATION - 1.0) {
-      halfBeatTimes.push(halfBeat);
-    }
-  }
-
-  const candidates = seededShuffle([...beatTimes, ...halfBeatTimes], rng).sort(
-    (a, b) => a - b
-  );
-
-  const picked: number[] = [];
-
-  for (const time of candidates) {
-    const tooClose = picked.some(
-      (pickedTime) => Math.abs(pickedTime - time) < 0.22
-    );
-
-    if (!tooClose) {
-      picked.push(time);
-    }
-
-    if (picked.length >= NOTE_COUNT) break;
-  }
-
-  return picked.sort((a, b) => a - b);
-}
-
-function pickHoldIndexesFromTimes(times: number[], rng: () => number) {
-  const picked: number[] = [];
-
-  const candidates = seededShuffle(
-    times
-      .map((_, index) => index)
-      .filter((index) => index >= 3 && index <= times.length - 4),
-    rng
-  );
-
-  for (const index of candidates) {
-    const tooClose = picked.some(
-      (pickedIndex) => Math.abs(pickedIndex - index) < 5
-    );
-
-    if (!tooClose) picked.push(index);
-    if (picked.length >= HOLD_COUNT) break;
-  }
-
-  return picked;
-}
-
-function isLaneBlockedByHold(
-  lane: number,
-  time: number,
-  holds: BattleNote[],
-  padding = 0.42
-) {
-  return holds.some((hold) => {
-    if (hold.lane !== lane) return false;
-
-    const holdStart = hold.targetTime - padding;
-    const holdEnd = hold.targetTime + hold.duration + padding;
-
-    return time >= holdStart && time <= holdEnd;
-  });
-}
-
-function pickSafeLaneForTap(
-  time: number,
-  holds: BattleNote[],
-  rng: () => number
-) {
-  const lanes = seededShuffle([0, 1, 2, 3], rng);
-
-  const safeLane = lanes.find(
-    (lane) => !isLaneBlockedByHold(lane, time, holds, 0.42)
-  );
-
-  return safeLane ?? lanes[0];
-}
-
-function pickSafeLaneForHold(
-  time: number,
-  duration: number,
-  existingHolds: BattleNote[],
-  rng: () => number
-) {
-  const lanes = seededShuffle([0, 1, 2, 3], rng);
-
-  const safeLane = lanes.find((lane) => {
-    const newStart = time - 0.5;
-    const newEnd = time + duration + 0.5;
-
-    return !existingHolds.some((hold) => {
-      if (hold.lane !== lane) return false;
-
-      const oldStart = hold.targetTime - 0.5;
-      const oldEnd = hold.targetTime + hold.duration + 0.5;
-
-      return newStart <= oldEnd && newEnd >= oldStart;
-    });
-  });
-
-  return safeLane ?? lanes[0];
-}
-
-function generateNotes(
-  turnIndex: number,
-  roomCode: string,
-  firstSide: Side | null
-) {
-  const seed = `${roomCode || "BEAT"}-${
-    firstSide || "A"
-  }-${turnIndex}-${MUSIC_BPM}`;
-  const rng = createRng(seed);
-
-  const beatTimes = generateBeatTimesForTurn(turnIndex, rng);
-
-  while (beatTimes.length < NOTE_COUNT) {
-    const index = beatTimes.length;
-    const fallbackTime =
-      1.2 + index * ((TURN_DURATION - 2.6) / (NOTE_COUNT - 1));
-    beatTimes.push(fallbackTime);
-  }
-
-  const finalTimes = beatTimes.slice(0, NOTE_COUNT).sort((a, b) => a - b);
-
-  const holdIndexes = pickHoldIndexesFromTimes(finalTimes, rng);
-  const holdIndexSet = new Set(holdIndexes);
-
-  const holds: BattleNote[] = [];
-  const notes: BattleNote[] = [];
-
-  for (let index = 0; index < finalTimes.length; index += 1) {
-    const type: NoteType = holdIndexSet.has(index) ? "hold" : "tap";
-    const targetTime = finalTimes[index];
-
-    if (type === "hold") {
-      const beatInterval = 60 / MUSIC_BPM;
-      const duration = beatInterval * (rng() > 0.5 ? 3 : 2) + rng() * 0.15;
-      const lane = pickSafeLaneForHold(targetTime, duration, holds, rng);
-
-      const holdNote: BattleNote = {
-        id: `turn-${turnIndex}-note-${index}-hold`,
-        type: "hold",
-        lane,
-        targetTime,
-        duration,
-        judged: false,
-      };
-
-      holds.push(holdNote);
-      notes.push(holdNote);
-      continue;
-    }
-
-    const lane = pickSafeLaneForTap(targetTime, holds, rng);
-
-    notes.push({
-      id: `turn-${turnIndex}-note-${index}-tap`,
-      type: "tap",
-      lane,
-      targetTime,
-      duration: 0,
-      judged: false,
-    });
-  }
-
-  return notes;
-}
-
 function getBaseScore(note: BattleNote, rating: HitRating) {
   if (note.type === "tap") return rating === "PERFECT" ? 100 : 65;
   return rating === "PERFECT" ? 160 : 105;
@@ -417,114 +192,58 @@ function getComboMultiplierLabel(comboValue: number) {
   return "x1.0";
 }
 
-function createBeep(
-  context: AudioContext,
-  time: number,
-  frequency: number,
-  duration: number,
-  volume: number
-) {
-  const oscillator = context.createOscillator();
-  const gain = context.createGain();
+function getPushFlipCount(timeMs: number, startedAt: number, until: number) {
+  if (!startedAt || timeMs >= until) return 0;
 
-  oscillator.type = "sine";
-  oscillator.frequency.setValueAtTime(frequency, time);
+  const elapsedMs = Math.max(0, timeMs - startedAt);
 
-  gain.gain.setValueAtTime(0.0001, time);
-  gain.gain.exponentialRampToValueAtTime(volume, time + 0.01);
-  gain.gain.exponentialRampToValueAtTime(0.0001, time + duration);
-
-  oscillator.connect(gain);
-  gain.connect(context.destination);
-
-  oscillator.start(time);
-  oscillator.stop(time + duration + 0.02);
-}
-
-function createKick(context: AudioContext, time: number) {
-  const oscillator = context.createOscillator();
-  const gain = context.createGain();
-
-  oscillator.type = "sine";
-  oscillator.frequency.setValueAtTime(130, time);
-  oscillator.frequency.exponentialRampToValueAtTime(45, time + 0.16);
-
-  gain.gain.setValueAtTime(0.0001, time);
-  gain.gain.exponentialRampToValueAtTime(
-    GENERATED_BEAT_VOLUME * 1.2,
-    time + 0.01
+  return clamp(
+    Math.floor(elapsedMs / PUSH_FLIP_INTERVAL_MS),
+    0,
+    PUSH_FLIP_COUNT
   );
-  gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.18);
-
-  oscillator.connect(gain);
-  gain.connect(context.destination);
-
-  oscillator.start(time);
-  oscillator.stop(time + 0.2);
 }
 
-function createHat(context: AudioContext, time: number) {
-  const bufferSize = Math.floor(context.sampleRate * 0.04);
-  const buffer = context.createBuffer(1, bufferSize, context.sampleRate);
-  const data = buffer.getChannelData(0);
-
-  for (let i = 0; i < bufferSize; i += 1) {
-    data[i] = Math.random() * 2 - 1;
+function getPushTimer(timeMs: number, startedAt: number, until: number) {
+  if (!startedAt || timeMs >= until) {
+    return {
+      active: false,
+      nextIn: 0,
+      count: 0,
+    };
   }
 
-  const noise = context.createBufferSource();
-  const filter = context.createBiquadFilter();
-  const gain = context.createGain();
-
-  noise.buffer = buffer;
-  filter.type = "highpass";
-  filter.frequency.setValueAtTime(7000, time);
-
-  gain.gain.setValueAtTime(0.0001, time);
-  gain.gain.exponentialRampToValueAtTime(
-    GENERATED_BEAT_VOLUME * 0.28,
-    time + 0.005
+  const elapsedMs = Math.max(0, timeMs - startedAt);
+  const count = clamp(
+    Math.floor(elapsedMs / PUSH_FLIP_INTERVAL_MS),
+    0,
+    PUSH_FLIP_COUNT
   );
-  gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.04);
+  const nextFlipAt = startedAt + (count + 1) * PUSH_FLIP_INTERVAL_MS;
+  const nextIn = clamp((nextFlipAt - timeMs) / 1000, 0, 3);
 
-  noise.connect(filter);
-  filter.connect(gain);
-  gain.connect(context.destination);
-
-  noise.start(time);
-  noise.stop(time + 0.05);
+  return {
+    active: count < PUSH_FLIP_COUNT,
+    nextIn,
+    count,
+  };
 }
 
-function createSnare(context: AudioContext, time: number) {
-  const bufferSize = Math.floor(context.sampleRate * 0.09);
-  const buffer = context.createBuffer(1, bufferSize, context.sampleRate);
-  const data = buffer.getChannelData(0);
+function generateNotesFromMusicChart(turnIndex: number) {
+  const globalStart = turnIndex * TURN_DURATION;
+  const globalEnd = globalStart + TURN_DURATION;
 
-  for (let i = 0; i < bufferSize; i += 1) {
-    data[i] = Math.random() * 2 - 1;
-  }
-
-  const noise = context.createBufferSource();
-  const filter = context.createBiquadFilter();
-  const gain = context.createGain();
-
-  noise.buffer = buffer;
-  filter.type = "bandpass";
-  filter.frequency.setValueAtTime(1800, time);
-
-  gain.gain.setValueAtTime(0.0001, time);
-  gain.gain.exponentialRampToValueAtTime(
-    GENERATED_BEAT_VOLUME * 0.8,
-    time + 0.01
-  );
-  gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.11);
-
-  noise.connect(filter);
-  filter.connect(gain);
-  gain.connect(context.destination);
-
-  noise.start(time);
-  noise.stop(time + 0.12);
+  return (MUSIC_CHART as MusicChartNote[])
+    .filter((chartNote) => chartNote.time >= globalStart && chartNote.time < globalEnd)
+    .map((chartNote, index) => ({
+      id: `turn-${turnIndex}-chart-${index}-${chartNote.type}`,
+      type: chartNote.type,
+      lane: clamp(chartNote.lane, 0, LANE_COUNT - 1),
+      targetTime: chartNote.time - globalStart,
+      duration: chartNote.type === "hold" ? chartNote.duration ?? 1.1 : 0,
+      judged: false,
+    }))
+    .sort((a, b) => a.targetTime - b.targetTime);
 }
 
 export default function App() {
@@ -577,7 +296,6 @@ export default function App() {
   const currentElapsedRef = useRef(0);
   const currentTurnSideRef = useRef<Side>("A");
   const activeEffectsRef = useRef(activeEffects);
-  const phaseRef = useRef<Phase>("start");
   const mySideRef = useRef<Side>("A");
   const holdingNoteIdRef = useRef<string | null>(null);
   const activePointerLanesRef = useRef<Map<number, number>>(new Map());
@@ -585,9 +303,7 @@ export default function App() {
   const lastFlipCountRef = useRef(0);
   const advancingRef = useRef(false);
 
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const beatTimerRef = useRef<number | null>(null);
-  const beatStartTimeRef = useRef(0);
+  const musicRef = useRef<HTMLAudioElement | null>(null);
 
   const selectedTeam = useMemo(
     () =>
@@ -677,7 +393,7 @@ export default function App() {
     });
 
     socket.on("battleStarted", ({ firstSide, turnIndex, startedAt }) => {
-      const firstNotes = generateNotes(turnIndex, roomCode || "BEAT", firstSide);
+      const firstNotes = generateNotesFromMusicChart(turnIndex);
 
       setFirstSide(firstSide);
       resetTurnStateOnly();
@@ -690,16 +406,18 @@ export default function App() {
       setPendingSkill(null);
       setNotesSafe(firstNotes);
       setPhase("battle");
+      playBattleMusic(turnIndex * TURN_DURATION);
     });
 
     socket.on("turnChanged", ({ turnIndex, startedAt }) => {
-      const nextNotes = generateNotes(turnIndex, roomCode || "BEAT", firstSide);
+      const nextNotes = generateNotesFromMusicChart(turnIndex);
 
       resetTurnStateOnly();
       setTurnIndex(turnIndex);
       setElapsed(0);
       setNotesSafe(nextNotes);
       setTurnStartMs(performance.now() - Math.max(0, Date.now() - startedAt));
+      playBattleMusic(turnIndex * TURN_DURATION);
     });
 
     socket.on("noteResult", (payload) => {
@@ -743,7 +461,7 @@ export default function App() {
       socket.off("noteResult");
       socket.off("skillActivated");
     };
-  }, [roomCode, firstSide]);
+  }, []);
 
   useEffect(() => {
     notesRef.current = notes;
@@ -752,10 +470,6 @@ export default function App() {
   useEffect(() => {
     activeEffectsRef.current = activeEffects;
   }, [activeEffects]);
-
-  useEffect(() => {
-    phaseRef.current = phase;
-  }, [phase]);
 
   useEffect(() => {
     mySideRef.current = mySide;
@@ -769,153 +483,25 @@ export default function App() {
     comboRef.current = combo;
   }, [combo]);
 
-  useEffect(() => {
-    if (phase !== "battle") {
-      stopGeneratedBeat();
-      return;
-    }
+  function playBattleMusic(globalStartSec: number) {
+    const audio = musicRef.current;
+    if (!audio) return;
 
-    if (!USE_GENERATED_BEAT) {
-      stopGeneratedBeat();
-      return;
-    }
+    audio.pause();
+    audio.currentTime = clamp(globalStartSec, 0, TOTAL_BATTLE_DURATION);
+    audio.volume = 0.75;
 
-    const currentTurnElapsed = Math.max(
-      0,
-      (performance.now() - turnStartMs) / 1000
-    );
-
-    const globalOffsetSec = clamp(
-      turnIndex * TURN_DURATION + currentTurnElapsed,
-      0,
-      TOTAL_BATTLE_DURATION - 0.5
-    );
-
-    startGeneratedBeat(globalOffsetSec);
-
-    return () => {
-      stopGeneratedBeat();
-    };
-  }, [phase, turnIndex, turnStartMs]);
-
-  function stopGeneratedBeat() {
-    if (beatTimerRef.current !== null) {
-      window.clearInterval(beatTimerRef.current);
-      beatTimerRef.current = null;
-    }
+    audio.play().catch(() => {
+      showFeedback("화면을 터치하면 음악 재생", "skill");
+    });
   }
 
-  function startGeneratedBeat(globalOffsetSec: number) {
-    stopGeneratedBeat();
+  function stopBattleMusic() {
+    const audio = musicRef.current;
+    if (!audio) return;
 
-    const AudioContextClass =
-      window.AudioContext ||
-      (
-        window as unknown as {
-          webkitAudioContext: typeof AudioContext;
-        }
-      ).webkitAudioContext;
-
-    if (!audioContextRef.current) {
-      audioContextRef.current = new AudioContextClass();
-    }
-
-    const context = audioContextRef.current;
-
-    if (context.state === "suspended") {
-      context.resume().catch(() => {});
-    }
-
-    const beatInterval = 60 / MUSIC_BPM;
-    const lookAhead = 0.12;
-
-    beatStartTimeRef.current = context.currentTime - globalOffsetSec;
-
-    let scheduledUntil = globalOffsetSec;
-
-    const schedule = () => {
-      const currentGlobalTime = context.currentTime - beatStartTimeRef.current;
-      const scheduleUntil = currentGlobalTime + lookAhead;
-
-      while (
-        scheduledUntil < scheduleUntil &&
-        scheduledUntil < TOTAL_BATTLE_DURATION
-      ) {
-        const beatNumber = Math.round(
-          (scheduledUntil - MUSIC_OFFSET_SEC) / beatInterval
-        );
-        const beatTime = MUSIC_OFFSET_SEC + beatNumber * beatInterval;
-
-        if (beatTime >= 0 && beatTime >= currentGlobalTime - 0.02) {
-          const audioTime = beatStartTimeRef.current + beatTime;
-          const beatInBar = ((beatNumber % 4) + 4) % 4;
-
-          if (beatInBar === 0) {
-            createKick(context, audioTime);
-            createBeep(
-              context,
-              audioTime,
-              220,
-              0.06,
-              GENERATED_BEAT_VOLUME * 0.35
-            );
-          }
-
-          if (beatInBar === 1 || beatInBar === 3) {
-            createSnare(context, audioTime);
-          }
-
-          createHat(context, audioTime);
-
-          const halfBeatTime = audioTime + beatInterval / 2;
-          if (halfBeatTime < beatStartTimeRef.current + TOTAL_BATTLE_DURATION) {
-            createHat(context, halfBeatTime);
-          }
-        }
-
-        scheduledUntil += beatInterval;
-      }
-    };
-
-    schedule();
-    beatTimerRef.current = window.setInterval(schedule, 25);
-  }
-
-  function getPushFlipCount(timeMs: number, startedAt: number, until: number) {
-    if (!startedAt || timeMs >= until) return 0;
-
-    const elapsedMs = Math.max(0, timeMs - startedAt);
-
-    return clamp(
-      Math.floor(elapsedMs / PUSH_FLIP_INTERVAL_MS),
-      0,
-      PUSH_FLIP_COUNT
-    );
-  }
-
-  function getPushTimer(timeMs: number, startedAt: number, until: number) {
-    if (!startedAt || timeMs >= until) {
-      return {
-        active: false,
-        nextIn: 0,
-        count: 0,
-      };
-    }
-
-    const elapsedMs = Math.max(0, timeMs - startedAt);
-    const count = clamp(
-      Math.floor(elapsedMs / PUSH_FLIP_INTERVAL_MS),
-      0,
-      PUSH_FLIP_COUNT
-    );
-    const nextFlipAt = startedAt + (count + 1) * PUSH_FLIP_INTERVAL_MS;
-    const nextIn = clamp((nextFlipAt - timeMs) / 1000, 0, 3);
-
-    return {
-      active: count < PUSH_FLIP_COUNT,
-      nextIn,
-      count,
-    };
+    audio.pause();
+    audio.currentTime = 0;
   }
 
   function setNotesSafe(nextNotes: BattleNote[]) {
@@ -1439,22 +1025,6 @@ export default function App() {
           return note;
         }
 
-        if (note.type === "hold") {
-          if (current > note.targetTime + MISS_AFTER_LINE) {
-            processedNoteIdsRef.current.add(note.id);
-            misses.push(note);
-            changed = true;
-
-            return {
-              ...note,
-              judged: true,
-              holding: false,
-            };
-          }
-
-          return note;
-        }
-
         if (current > note.targetTime + MISS_AFTER_LINE) {
           processedNoteIdsRef.current.add(note.id);
           misses.push(note);
@@ -1548,7 +1118,7 @@ export default function App() {
 
     if (turnIndex >= TOTAL_TURNS - 1) {
       resetTurnStateOnly();
-      stopGeneratedBeat();
+      stopBattleMusic();
       setPhase("result");
       return;
     }
@@ -1665,7 +1235,8 @@ export default function App() {
     const now = Date.now();
 
     const effectShouldShow =
-      targetSide === mySideRef.current || targetSide === currentTurnSideRef.current;
+      targetSide === mySideRef.current ||
+      targetSide === currentTurnSideRef.current;
 
     if (!effectShouldShow) return;
 
@@ -1828,6 +1399,8 @@ export default function App() {
 
   return (
     <main className="app">
+      <audio ref={musicRef} src={MUSIC_URL} preload="auto" />
+
       <section className="phone">
         {phase === "start" && (
           <div className="screen startScreen">
@@ -2105,15 +1678,14 @@ export default function App() {
               onPointerUp={handlePointerUp}
               onPointerCancel={handlePointerUp}
             >
-             {[0, 1, 2, 3].map((lane) => (
-  <div
-    key={lane}
-    className={`lane ${pressedLanes[lane] ? "pressed" : ""}`}
-  />
-))}
+              {[0, 1, 2, 3].map((lane) => (
+                <div
+                  key={lane}
+                  className={`lane ${pressedLanes[lane] ? "pressed" : ""}`}
+                />
+              ))}
 
               <div className="judgeLine" />
-
               <div className="missZone" />
 
               {isSpectating && (
