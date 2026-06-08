@@ -1494,3 +1494,84 @@ button {
 .lane span {
   display: none !important;
 }
+/* ===== lane touch glow only ===== */
+
+/* 하단 빨간 MISS 구역 제거하고 보라빛 터치 구역으로 변경 */
+.missZone {
+  top: 82%;
+  bottom: 0;
+  background: linear-gradient(
+    180deg,
+    rgba(98, 60, 180, 0.16) 0%,
+    rgba(120, 70, 210, 0.22) 55%,
+    rgba(145, 80, 235, 0.28) 100%
+  );
+  border-top: none;
+  box-shadow:
+    inset 0 10px 24px rgba(180, 120, 255, 0.08),
+    inset 0 -16px 32px rgba(50, 16, 90, 0.3);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* 혹시 남아있으면 숨김 */
+.inputButtons,
+.laneInputButton,
+.missZone span,
+.lane span {
+  display: none !important;
+}
+
+/* 레인 기본 */
+.lane {
+  position: relative;
+  z-index: 2;
+  transition:
+    background 0.14s ease,
+    box-shadow 0.14s ease;
+}
+
+/* 눌린 레인 전체가 빛나게 */
+.lane.pressed {
+  background: linear-gradient(
+    180deg,
+    rgba(120, 210, 255, 0.05) 0%,
+    rgba(120, 120, 255, 0.08) 45%,
+    rgba(190, 100, 255, 0.16) 100%
+  );
+  box-shadow:
+    inset 0 0 18px rgba(120, 220, 255, 0.08),
+    inset 0 -80px 120px rgba(190, 100, 255, 0.18);
+}
+
+/* 눌린 칸 안쪽 발광층 */
+.lane.pressed::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    rgba(120, 220, 255, 0.03) 0%,
+    rgba(140, 120, 255, 0.06) 45%,
+    rgba(210, 110, 255, 0.18) 100%
+  );
+  box-shadow:
+    inset 0 0 24px rgba(160, 240, 255, 0.08),
+    inset 0 -40px 80px rgba(210, 110, 255, 0.14);
+  pointer-events: none;
+}
+
+/* 판정선은 위에 유지 */
+.judgeLine {
+  z-index: 4;
+}
+
+/* 노트는 더 위에 */
+.note {
+  z-index: 5;
+}
+
+/* 피드백도 위 */
+.feedback {
+  z-index: 7;
+}
