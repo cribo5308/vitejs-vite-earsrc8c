@@ -1,29 +1,21 @@
 import { io } from "socket.io-client";
 
-function getSocketServerUrl() {
-  const envUrl = import.meta.env.VITE_SOCKET_SERVER_URL;
+const SOCKET_SERVER_URL = "https://beat-rise-server.onrender.com";
 
-  if (envUrl) return envUrl;
-
-  const { protocol, hostname } = window.location;
-
-  // StackBlitz WebContainer 주소에서 프론트 포트를 서버 포트 3001로 바꿈
-  if (hostname.includes("webcontainer-api.io")) {
-    const serverHostname = hostname.replace(/-(\d+)(--|-)/, "-3001$2");
-    return `${protocol}//${serverHostname}`;
-  }
-
-  return "http://localhost:3001";
-}
-
-export const socket = io(getSocketServerUrl(), {
+export const socket = io(SOCKET_SERVER_URL, {
   autoConnect: false,
   transports: ["websocket", "polling"],
+  reconnection: true,
+  reconnectionAttempts: 10,
+  reconnectionDelay: 800,
+  timeout: 20000,
 });
+
+export type Side = "A" | "B";
 
 export type ServerRoomPlayer = {
   socketId: string;
-  side: "A" | "B";
+  side: Side;
   ready: boolean;
   characters: string[];
 };
@@ -32,9 +24,9 @@ export type ServerRoomState = {
   roomCode: string;
   phase: "waiting" | "select" | "bottle" | "battle" | "result";
   players: ServerRoomPlayer[];
-  firstSide: "A" | "B" | null;
+  firstSide: Side | null;
   turnIndex: number;
-  currentTurnSide: "A" | "B" | null;
+  currentTurnSide: Side | null;
   scores: {
     A: number;
     B: number;
