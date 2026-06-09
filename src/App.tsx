@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, CSSProperties, PointerEvent } from "react";
+import type { Session } from "@supabase/supabase-js";
+import { supabase } from "./supabaseClient";
 import { socket, type ServerRoomState } from "./socket";
 import { MUSIC_CHART } from "./musicChart";
 import "./App.css";
@@ -87,6 +89,17 @@ type PlayerSaveData = {
   nickname: string;
   profileImage: string;
   totalExp: number;
+  wins: number;
+  losses: number;
+  following: number;
+  followers: number;
+};
+
+type PlayerProfileRow = {
+  id: string;
+  nickname: string;
+  profile_image: string;
+  total_exp: number;
   wins: number;
   losses: number;
   following: number;
@@ -208,7 +221,6 @@ function getComboMultiplier(comboValue: number) {
 
 function getComboMultiplierLabel(comboValue: number) {
   const multiplier = getComboMultiplier(comboValue);
-
   if (multiplier === 2) return "x2.0";
   if (multiplier === 1.5) return "x1.5";
   return "x1.0";
@@ -216,7 +228,6 @@ function getComboMultiplierLabel(comboValue: number) {
 
 function getPushFlipCount(timeMs: number, startedAt: number, until: number) {
   if (!startedAt || timeMs >= until) return 0;
-
   const elapsedMs = Math.max(0, timeMs - startedAt);
 
   return clamp(
@@ -251,22 +262,23 @@ function getPushTimer(timeMs: number, startedAt: number, until: number) {
   };
 }
 
+function makeDefaultPlayerSave(): PlayerSaveData {
+  return {
+    loggedIn: false,
+    nickname: "Danzy",
+    profileImage: "",
+    totalExp: 0,
+    wins: 0,
+    losses: 0,
+    following: 128,
+    followers: 940,
+  };
+}
+
 function loadPlayerSave(): PlayerSaveData {
   try {
     const raw = localStorage.getItem(PLAYER_SAVE_KEY);
-
-    if (!raw) {
-      return {
-        loggedIn: false,
-        nickname: "Danzy",
-        profileImage: "",
-        totalExp: 0,
-        wins: 0,
-        losses: 0,
-        following: 128,
-        followers: 940,
-      };
-    }
+    if (!raw) return makeDefaultPlayerSave();
 
     const parsed = JSON.parse(raw) as Partial<PlayerSaveData>;
 
@@ -281,17 +293,35 @@ function loadPlayerSave(): PlayerSaveData {
       followers: Number(parsed.followers || 940),
     };
   } catch {
-    return {
-      loggedIn: false,
-      nickname: "Danzy",
-      profileImage: "",
-      totalExp: 0,
-      wins: 0,
-      losses: 0,
-      following: 128,
-      followers: 940,
-    };
+    return makeDefaultPlayerSave();
   }
+}
+
+function profileRowToSave(row: PlayerProfileRow): PlayerSaveData {
+  return {
+    loggedIn: true,
+    nickname: row.nickname || "Danzy",
+    profileImage: row.profile_image || "",
+    totalExp: Number(row.total_exp || 0),
+    wins: Number(row.wins || 0),
+    losses: Number(row.losses || 0),
+    following: Number(row.following || 128),
+    followers: Number(row.followers || 940),
+  };
+}
+
+function saveToProfileRow(userId: string, data: PlayerSaveData) {
+  return {
+    id: userId,
+    nickname: data.nickname || "Danzy",
+    profile_image: data.profileImage || "",
+    total_exp: data.totalExp || 0,
+    wins: data.wins || 0,
+    losses: data.losses || 0,
+    following: data.following || 128,
+    followers: data.followers || 940,
+    updated_at: new Date().toISOString(),
+  };
 }
 
 function getLevelFromExp(totalExp: number) {
@@ -318,6 +348,25 @@ function getWinRate(wins: number, losses: number) {
   const total = wins + losses;
   if (total <= 0) return 0;
   return Math.round((wins / total) * 100);
+}
+
+function getNicknameFromSession(session: Session | null) {
+  const user = session?.user;
+  const metadata = user?.user_metadata as
+    | {
+        full_name?: string;
+        name?: string;
+        user_name?: string;
+      }
+    | undefined;
+
+  return (
+    metadata?.full_name ||
+    metadata?.name ||
+    metadata?.user_name ||
+    user?.email?.split("@")[0] ||
+    "Danzy"
+  );
 }
 
 function generateNotesFromMusicChart(turnIndex: number) {
@@ -450,6 +499,10 @@ export default function App() {
   const [connected, setConnected] = useState(socket.connected);
   const [joined, setJoined] = useState(false);
 
+  const [session, setSession] = useState<Session | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [profileSyncing, setProfileSyncing] = useState(false);
+
   const [profileOpen, setProfileOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [turntableAngle, setTurntableAngle] = useState(0);
@@ -510,6 +563,8 @@ export default function App() {
   const lastFlipCountRef = useRef(0);
   const advancingRef = useRef(false);
   const resultRewardAppliedRef = useRef(false);
+
+  const playerSaveRef = useRef(playerSave);
 
   const turntableDragRef = useRef({
     dragging: false,
@@ -591,6 +646,49 @@ export default function App() {
   const bothReady =
     serverRoom?.players.length === 2 &&
     serverRoom.players.every((player) => player.ready);
+
+  useEffect(() => {
+    playerSaveRef.current = playerSave;
+  }, [playerSave]);
+
+  useEffect(() => {
+    async function initAuth() {
+      setAuthLoading(true);
+
+      const { data } = await supabase.auth.getSession();
+      const currentSession = data.session;
+
+      setSession(currentSession);
+
+      if (currentSession) {
+        await loadOrCreateSupabaseProfile(currentSession);
+      }
+
+      setAuthLoading(false);
+    }
+
+    initAuth();
+
+    const { data: listener } = supabase.auth.onAuthStateChange(
+      async (_event, nextSession) => {
+        setSession(nextSession);
+
+        if (nextSession) {
+          await loadOrCreateSupabaseProfile(nextSession);
+        } else {
+          const local = loadPlayerSave();
+          setPlayerSave({
+            ...local,
+            loggedIn: false,
+          });
+        }
+      }
+    );
+
+    return () => {
+      listener.subscription.unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     const onConnect = () => setConnected(true);
@@ -760,12 +858,13 @@ export default function App() {
 
     const didWin = winner === mySide;
     const gainedExp = didWin ? WIN_EXP : LOSE_EXP;
+    const currentSave = playerSaveRef.current;
 
     savePlayerData({
-      ...playerSave,
-      totalExp: playerSave.totalExp + gainedExp,
-      wins: didWin ? playerSave.wins + 1 : playerSave.wins,
-      losses: didWin ? playerSave.losses : playerSave.losses + 1,
+      ...currentSave,
+      totalExp: currentSave.totalExp + gainedExp,
+      wins: didWin ? currentSave.wins + 1 : currentSave.wins,
+      losses: didWin ? currentSave.losses : currentSave.losses + 1,
     });
 
     window.setTimeout(() => {
@@ -777,14 +876,86 @@ export default function App() {
     }, 250);
   }, [phase, finalScores]);
 
-  function savePlayerData(nextData: PlayerSaveData) {
-    setPlayerSave(nextData);
-    localStorage.setItem(PLAYER_SAVE_KEY, JSON.stringify(nextData));
+  async function loadOrCreateSupabaseProfile(currentSession: Session) {
+    const userId = currentSession.user.id;
+    setProfileSyncing(true);
+
+    const { data: existing, error: selectError } = await supabase
+      .from("player_profiles")
+      .select("*")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (selectError) {
+      console.error(selectError);
+      setProfileSyncing(false);
+      return;
+    }
+
+    if (existing) {
+      const saveData = profileRowToSave(existing as PlayerProfileRow);
+      setPlayerSave(saveData);
+      localStorage.setItem(PLAYER_SAVE_KEY, JSON.stringify(saveData));
+      setProfileSyncing(false);
+      return;
+    }
+
+    const defaultData: PlayerSaveData = {
+      ...makeDefaultPlayerSave(),
+      loggedIn: true,
+      nickname: getNicknameFromSession(currentSession),
+    };
+
+    const { data: inserted, error: insertError } = await supabase
+      .from("player_profiles")
+      .insert(saveToProfileRow(userId, defaultData))
+      .select("*")
+      .single();
+
+    if (insertError) {
+      console.error(insertError);
+      setPlayerSave(defaultData);
+      localStorage.setItem(PLAYER_SAVE_KEY, JSON.stringify(defaultData));
+      setProfileSyncing(false);
+      return;
+    }
+
+    const saveData = profileRowToSave(inserted as PlayerProfileRow);
+    setPlayerSave(saveData);
+    localStorage.setItem(PLAYER_SAVE_KEY, JSON.stringify(saveData));
+    setProfileSyncing(false);
+  }
+
+  async function savePlayerData(nextData: PlayerSaveData) {
+    const nextWithLogin = {
+      ...nextData,
+      loggedIn: Boolean(session),
+    };
+
+    setPlayerSave(nextWithLogin);
+    localStorage.setItem(PLAYER_SAVE_KEY, JSON.stringify(nextWithLogin));
+
+    if (!session?.user.id) return;
+
+    setProfileSyncing(true);
+
+    const { error } = await supabase
+      .from("player_profiles")
+      .upsert(saveToProfileRow(session.user.id, nextWithLogin), {
+        onConflict: "id",
+      });
+
+    if (error) {
+      console.error(error);
+      showFeedback("저장 실패", "miss", "Supabase 확인 필요");
+    }
+
+    setProfileSyncing(false);
   }
 
   function saveNickname(nextName: string) {
     savePlayerData({
-      ...playerSave,
+      ...playerSaveRef.current,
       nickname: nextName,
     });
   }
@@ -799,7 +970,7 @@ export default function App() {
       const result = String(reader.result || "");
 
       savePlayerData({
-        ...playerSave,
+        ...playerSaveRef.current,
         profileImage: result,
       });
     };
@@ -807,15 +978,33 @@ export default function App() {
     reader.readAsDataURL(file);
   }
 
-  function fakeGoogleLogin() {
-    savePlayerData({
-      ...playerSave,
-      loggedIn: true,
+  async function signInWithGoogle() {
+    const redirectTo = `${window.location.origin}/`;
+
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo,
+      },
     });
 
-    alert(
-      "로그인 정보가 저장됐어. 지금은 테스트 저장 방식이고, 나중에 Firebase를 연결하면 진짜 Google 계정 저장으로 바꿀 수 있어."
-    );
+    if (error) {
+      console.error(error);
+      alert(`Google 로그인 실패: ${error.message}`);
+    }
+  }
+
+  async function signOut() {
+    await supabase.auth.signOut();
+    setSession(null);
+
+    const local = loadPlayerSave();
+    setPlayerSave({
+      ...local,
+      loggedIn: false,
+    });
+
+    setMenuOpen(false);
   }
 
   function getPointerAngle(clientX: number, clientY: number) {
@@ -1288,7 +1477,6 @@ export default function App() {
       const current = currentElapsedRef.current;
       const holdEndTime = note.targetTime + note.duration;
       const rating = note.holdRating ?? "GOOD";
-
       const heldUntilEnd = current >= holdEndTime - HOLD_RELEASE_EARLY_WINDOW;
 
       if (heldUntilEnd) {
@@ -2005,22 +2193,36 @@ export default function App() {
 
                   <h2>메뉴</h2>
 
-                  {playerSave.loggedIn ? (
+                  {authLoading ? (
+                    <p>로그인 상태 확인 중...</p>
+                  ) : session ? (
                     <p>
-                      Google 로그인 상태야. 현재 레벨과 전적은 이 브라우저에
+                      Supabase Google 로그인 상태야. 현재 레벨과 전적은 계정에
                       저장돼.
                     </p>
                   ) : (
-                    <p>Google 로그인을 누르면 플레이 정보가 저장돼.</p>
+                    <p>Google 로그인하면 Supabase 계정에 플레이 정보가 저장돼.</p>
                   )}
 
-                  <button className="googleLoginButton" onClick={fakeGoogleLogin}>
-                    {playerSave.loggedIn ? "Google 로그인됨" : "Google 로그인"}
-                  </button>
+                  {!session ? (
+                    <button
+                      className="googleLoginButton"
+                      onClick={signInWithGoogle}
+                    >
+                      Google 로그인
+                    </button>
+                  ) : (
+                    <button className="googleLoginButton" onClick={signOut}>
+                      로그아웃
+                    </button>
+                  )}
 
                   <small>
-                    현재는 테스트 저장 방식이야. Firebase 연결 후 진짜 Google
-                    계정 저장으로 바꿀 수 있어.
+                    {profileSyncing
+                      ? "Supabase 저장 중..."
+                      : session
+                        ? "배틀 승패, 경험치, 닉네임이 계정에 저장돼."
+                        : "로그인 전에는 이 브라우저에만 임시 저장돼."}
                   </small>
                 </div>
               </div>
