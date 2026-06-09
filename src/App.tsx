@@ -668,7 +668,9 @@ export default function App() {
 
   function fakeGoogleLogin() {
     localStorage.setItem("beatRiseLogin", "google-demo");
-    alert("지금은 테스트 로그인 UI야. 실제 구글 로그인은 Firebase 연결 후 적용 가능해.");
+    alert(
+      "지금은 테스트 로그인 UI야. 실제 구글 로그인은 Firebase 연결 후 적용 가능해."
+    );
   }
 
   function playBattleMusic(globalStartSec: number) {
