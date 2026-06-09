@@ -92,10 +92,10 @@ const FALL_DURATION = 2.35;
 const NOTE_START_TOP = -12;
 const JUDGE_LINE_TOP = 82;
 
-const PERFECT_WINDOW = 0.09;
-const GOOD_WINDOW = 0.22;
-const EASY_GOOD_WINDOW = 0.34;
-const MISS_AFTER_LINE = 0.28;
+const PERFECT_WINDOW = 0.11;
+const GOOD_WINDOW = 0.28;
+const EASY_GOOD_WINDOW = 0.36;
+const MISS_AFTER_LINE = 0.36;
 
 const HOLD_TICK_INTERVAL = 0.25;
 const HOLD_RELEASE_EARLY_WINDOW = 0.22;
@@ -159,7 +159,7 @@ const characters: Character[] = [
     skillName: "이지모드",
     skillTarget: "own",
     costRatio: 0,
-    desc: "5초 동안 안정적인 롱노트 구간을 만든다.",
+    desc: "조작감 개선 후 다시 적용 예정.",
   },
   {
     id: "kai",
@@ -252,7 +252,9 @@ function generateNotesFromMusicChart(turnIndex: number) {
       const lane = clamp(chartNote.lane, 0, LANE_COUNT - 1);
 
       return {
-        id: `turn-${turnIndex}-chart-${localTime.toFixed(3)}-${lane}-${chartNote.type}`,
+        id: `turn-${turnIndex}-chart-${localTime.toFixed(3)}-${lane}-${
+          chartNote.type
+        }`,
         type: chartNote.type,
         lane,
         targetTime: localTime,
@@ -295,8 +297,6 @@ function generateNotesFromMusicChart(turnIndex: number) {
     );
   }
 
-  // 30초 턴 전체에 고정 보충 노트 생성
-  // 0.58초 간격이면 한 턴당 약 48~50개 흐름이 생김
   let cursor = 1.0;
 
   while (cursor <= TURN_DURATION - 0.75) {
@@ -318,7 +318,6 @@ function generateNotesFromMusicChart(turnIndex: number) {
     cursor += 0.58;
   }
 
-  // 턴 끝부분이 비지 않게 마지막 보강 노트 추가
   const endFillTimes = [26.8, 27.5, 28.2, 28.9, 29.35];
 
   for (const endTime of endFillTimes) {
@@ -561,25 +560,6 @@ export default function App() {
       }
     );
 
-    socket.on("battleEnded", ({ scores }) => {
-      const finalA = scores?.A ?? scoreARef.current;
-      const finalB = scores?.B ?? scoreBRef.current;
-
-      scoreARef.current = finalA;
-      scoreBRef.current = finalB;
-
-      setScoreA(finalA);
-      setScoreB(finalB);
-      setFinalScores({
-        A: finalA,
-        B: finalB,
-      });
-
-      resetTurnStateOnly();
-      stopBattleMusic();
-      setPhase("result");
-    });
-
     return () => {
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
@@ -591,7 +571,6 @@ export default function App() {
       socket.off("turnChanged");
       socket.off("noteResult");
       socket.off("skillActivated");
-      socket.off("battleEnded");
     };
   }, []);
 
@@ -1290,11 +1269,6 @@ export default function App() {
       };
 
       setFinalScores(final);
-
-      socket.emit("battleEnded", {
-        roomCode: roomCode || "BEAT",
-      });
-
       resetTurnStateOnly();
       stopBattleMusic();
       setPhase("result");
@@ -1404,54 +1378,6 @@ export default function App() {
     });
   }
 
-  function activateEasyModePattern(current: number) {
-    const skillStart = current + 0.35;
-    const skillEnd = current + 5.0;
-
-    updateNotes((prev) => {
-      const filtered = prev.map((note) => {
-        const isTapInSkillWindow =
-          note.type === "tap" &&
-          !note.judged &&
-          note.targetTime >= skillStart &&
-          note.targetTime <= skillEnd;
-
-        if (!isTapInSkillWindow) return note;
-
-        return {
-          ...note,
-          judged: true,
-          skippedBySkill: true,
-        };
-      });
-
-      const specialHolds: BattleNote[] = [
-        {
-          id: `easy-left-${Date.now()}`,
-          type: "hold",
-          lane: 0,
-          targetTime: skillStart + 0.8,
-          duration: 3.2,
-          judged: false,
-          skillGenerated: true,
-        },
-        {
-          id: `easy-right-${Date.now()}`,
-          type: "hold",
-          lane: 3,
-          targetTime: skillStart + 1.4,
-          duration: 3.2,
-          judged: false,
-          skillGenerated: true,
-        },
-      ];
-
-      return [...filtered, ...specialHolds].sort(
-        (a, b) => a.targetTime - b.targetTime
-      );
-    });
-  }
-
   function applySkillEffect(
     skillId: string,
     skillName: string,
@@ -1493,12 +1419,7 @@ export default function App() {
     }
 
     if (skillId === "luna") {
-      setActiveEffects((prev) => ({
-        ...prev,
-        easyUntil: now + 5000,
-      }));
-      activateEasyModePattern(currentElapsedRef.current);
-      showFeedback(`${skillName}!`, "skill", "양쪽 롱노트 생성");
+      showFeedback("이지모드 준비중", "skill", "조작감 개선 후 적용");
     }
 
     if (skillId === "kai") {
@@ -1513,6 +1434,7 @@ export default function App() {
   function canUseSkill(char: Character) {
     if (phase !== "battle") return false;
     if (pendingSkill) return false;
+    if (char.id === "luna") return false;
 
     const cdUntil = cooldowns[char.id] ?? 0;
     if (nowMs < cdUntil) return false;
@@ -1916,7 +1838,9 @@ export default function App() {
                 <div
                   key={lane}
                   className={`lane ${pressedLanes[lane] ? "pressed" : ""}`}
-                />
+                >
+                  <div className="laneFullGlow" />
+                </div>
               ))}
 
               <div className="judgeLine" />
@@ -1961,9 +1885,7 @@ export default function App() {
                         height: `${Math.max(135, note.duration * 125)}px`,
                         ...waterStyle,
                       }}
-                    >
-                      <span>HOLD</span>
-                    </div>
+                    />
                   );
                 }
 
@@ -1976,9 +1898,7 @@ export default function App() {
                       top: `${top}%`,
                       ...waterStyle,
                     }}
-                  >
-                    TAP
-                  </div>
+                  />
                 );
               })}
 
