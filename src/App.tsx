@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, PointerEvent } from "react";
+import type { ChangeEvent, CSSProperties, PointerEvent } from "react";
 import { socket, type ServerRoomState } from "./socket";
 import { MUSIC_CHART } from "./musicChart";
 import "./App.css";
 
 type Phase =
-  | "start"
+  | "home"
   | "room"
   | "select"
   | "ready"
@@ -47,8 +47,6 @@ type BattleNote = {
   holding?: boolean;
   holdRating?: HitRating;
   holdLastTickAt?: number;
-  skillGenerated?: boolean;
-  skippedBySkill?: boolean;
 };
 
 type ActiveEffects = {
@@ -139,7 +137,7 @@ const characters: Character[] = [
     skillName: "밀치기",
     skillTarget: "opponent",
     costRatio: 0.2,
-    desc: "3초마다 좌우반전, 총 3회.",
+    desc: "3초마다 좌우반전.",
   },
   {
     id: "mika",
@@ -169,7 +167,7 @@ const characters: Character[] = [
     skillName: "피버타임",
     skillTarget: "own",
     costRatio: 0,
-    desc: "10초간 점수 2배. 콤보 실패 시 종료.",
+    desc: "10초간 점수 2배.",
   },
 ];
 
@@ -251,6 +249,14 @@ function generateNotesFromMusicChart(turnIndex: number) {
       const localTime = Number((chartNote.time - globalStart).toFixed(3));
       const lane = clamp(chartNote.lane, 0, LANE_COUNT - 1);
 
+      const variedHoldDuration =
+        chartNote.type === "hold"
+          ? chartNote.duration ??
+            [0.85, 1.25, 1.75, 2.35][
+              (Math.floor(localTime * 10) + turnIndex) % 4
+            ]
+          : 0;
+
       return {
         id: `turn-${turnIndex}-chart-${localTime.toFixed(3)}-${lane}-${
           chartNote.type
@@ -258,7 +264,7 @@ function generateNotesFromMusicChart(turnIndex: number) {
         type: chartNote.type,
         lane,
         targetTime: localTime,
-        duration: chartNote.type === "hold" ? chartNote.duration ?? 1.05 : 0,
+        duration: variedHoldDuration,
         judged: false,
       };
     });
@@ -305,12 +311,20 @@ function generateNotesFromMusicChart(turnIndex: number) {
     if (!hasNearbyNote(time)) {
       const lane = pickDeterministicLane(time);
 
+      const shouldMakeHold =
+        time > 3 &&
+        time < TURN_DURATION - 4 &&
+        (Math.floor(time * 100) + turnIndex * 13) % 17 === 0;
+
+      const holdDuration =
+        [0.85, 1.35, 2.25][(Math.floor(time * 10) + turnIndex) % 3];
+
       filledNotes.push({
         id: `turn-${turnIndex}-fill-${time.toFixed(3)}-${lane}`,
-        type: "tap",
+        type: shouldMakeHold ? "hold" : "tap",
         lane,
         targetTime: time,
-        duration: 0,
+        duration: shouldMakeHold ? holdDuration : 0,
         judged: false,
       });
     }
@@ -344,12 +358,34 @@ function generateNotesFromMusicChart(turnIndex: number) {
 }
 
 export default function App() {
-  const [phase, setPhase] = useState<Phase>("start");
+  const [phase, setPhase] = useState<Phase>("home");
   const [roomCode, setRoomCode] = useState("");
   const [mySide, setMySide] = useState<Side>("A");
   const [serverRoom, setServerRoom] = useState<ServerRoomState | null>(null);
   const [connected, setConnected] = useState(socket.connected);
   const [joined, setJoined] = useState(false);
+
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [turntableAngle, setTurntableAngle] = useState(0);
+
+  const [nickname, setNickname] = useState(() => {
+    return localStorage.getItem("beatRiseNickname") || "Danzy";
+  });
+
+  const [profileImage, setProfileImage] = useState(() => {
+    return localStorage.getItem("beatRiseProfileImage") || "";
+  });
+
+  const [playerStats] = useState({
+    level: 12,
+    rank: "B-BOY SILVER",
+    exp: 68,
+    following: 128,
+    followers: 940,
+    recent: "3승 2패",
+    winRate: 62,
+  });
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [firstSide, setFirstSide] = useState<Side | null>(null);
@@ -601,6 +637,39 @@ export default function App() {
   useEffect(() => {
     scoreBRef.current = scoreB;
   }, [scoreB]);
+
+  function saveNickname(nextName: string) {
+    setNickname(nextName);
+    localStorage.setItem("beatRiseNickname", nextName);
+  }
+
+  function handleProfileImageChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      setProfileImage(result);
+      localStorage.setItem("beatRiseProfileImage", result);
+    };
+
+    reader.readAsDataURL(file);
+  }
+
+  function spinTurntable() {
+    setTurntableAngle((prev) => prev + 120);
+  }
+
+  function openBattleFromHome() {
+    goRoom();
+  }
+
+  function fakeGoogleLogin() {
+    localStorage.setItem("beatRiseLogin", "google-demo");
+    alert("지금은 테스트 로그인 UI야. 실제 구글 로그인은 Firebase 연결 후 적용 가능해.");
+  }
 
   function playBattleMusic(globalStartSec: number) {
     const audio = musicRef.current;
@@ -1558,19 +1627,160 @@ export default function App() {
       <audio ref={musicRef} src={MUSIC_URL} preload="auto" />
 
       <section className="phone">
-        {phase === "start" && (
-          <div className="screen startScreen">
-            <div className="logoMark">BR</div>
-            <h1>Beat Rise</h1>
-            <p>실시간 턴제 리듬 배틀</p>
+        {phase === "home" && (
+          <div className="screen homeScreen">
+            <div className="homeTopProfile" onClick={() => setProfileOpen(true)}>
+              <div className="profileAvatar">
+                {profileImage ? <img src={profileImage} alt="profile" /> : "D"}
+              </div>
 
-            <button className="primaryButton" onClick={goRoom}>
-              ONLINE BATTLE
-            </button>
+              <div className="profileInfo">
+                <strong>{nickname}</strong>
+                <span>
+                  Lv.{playerStats.level} · {playerStats.rank}
+                </span>
 
-            <p className="startHint">
-              서버 상태: {connected ? "연결 가능" : "아직 연결 안 됨"}
-            </p>
+                <div className="expBar">
+                  <div style={{ width: `${playerStats.exp}%` }} />
+                </div>
+              </div>
+            </div>
+
+            <div className="homeSideButtons">
+              <button onClick={() => setMenuOpen(true)}>☰</button>
+              <button>🎯</button>
+              <button>👥</button>
+              <button>✉️</button>
+            </div>
+
+            <div className="turntableWrap">
+              <button className="turntableSpinButton" onClick={spinTurntable}>
+                돌리기
+              </button>
+
+              <div
+                className="turntable"
+                style={{
+                  transform: `rotate(${turntableAngle}deg)`,
+                }}
+              >
+                <button
+                  className="turntableSlice battleSlice"
+                  onClick={openBattleFromHome}
+                >
+                  <span>배틀</span>
+                </button>
+
+                <button className="turntableSlice eventSlice">
+                  <span>이벤트</span>
+                </button>
+
+                <button className="turntableSlice auditionSlice">
+                  <span>오디션</span>
+                </button>
+
+                <div className="turntableCenter">
+                  <b>BR</b>
+                </div>
+              </div>
+            </div>
+
+            <div className="homeBottomNav">
+              <button>댄서</button>
+              <button>인벤토리</button>
+              <button className="active">홈</button>
+              <button>상점</button>
+              <button>스케줄</button>
+            </div>
+
+            {profileOpen && (
+              <div className="modalBackdrop" onClick={() => setProfileOpen(false)}>
+                <div className="profileModal" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    className="modalClose"
+                    onClick={() => setProfileOpen(false)}
+                  >
+                    ×
+                  </button>
+
+                  <h2>프로필</h2>
+
+                  <div className="profileEditAvatar">
+                    <div className="bigAvatar">
+                      {profileImage ? (
+                        <img src={profileImage} alt="profile" />
+                      ) : (
+                        "D"
+                      )}
+                    </div>
+
+                    <label className="imageUploadButton">
+                      사진 변경
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleProfileImageChange}
+                      />
+                    </label>
+                  </div>
+
+                  <label className="profileEditLabel">
+                    닉네임
+                    <input
+                      value={nickname}
+                      onChange={(e) => saveNickname(e.target.value)}
+                    />
+                  </label>
+
+                  <div className="followStats">
+                    <div>
+                      <strong>{playerStats.following}</strong>
+                      <span>팔로우</span>
+                    </div>
+                    <div>
+                      <strong>{playerStats.followers}</strong>
+                      <span>팔로워</span>
+                    </div>
+                  </div>
+
+                  <div className="recordBox">
+                    <div>
+                      <span>최근 전적</span>
+                      <strong>{playerStats.recent}</strong>
+                    </div>
+                    <div>
+                      <span>승률</span>
+                      <strong>{playerStats.winRate}%</strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {menuOpen && (
+              <div className="modalBackdrop" onClick={() => setMenuOpen(false)}>
+                <div className="menuModal" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    className="modalClose"
+                    onClick={() => setMenuOpen(false)}
+                  >
+                    ×
+                  </button>
+
+                  <h2>메뉴</h2>
+                  <p>계정에 로그인하면 플레이 기록을 저장할 수 있어.</p>
+
+                  <button className="googleLoginButton" onClick={fakeGoogleLogin}>
+                    Google 로그인
+                  </button>
+
+                  <small>
+                    현재는 테스트 로그인 UI야. 실제 구글 로그인은 Firebase 연결 후
+                    완성 가능.
+                  </small>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1965,8 +2175,8 @@ export default function App() {
               다시 선택하기
             </button>
 
-            <button className="ghostButton" onClick={() => setPhase("start")}>
-              처음으로
+            <button className="ghostButton" onClick={() => setPhase("home")}>
+              홈으로
             </button>
           </div>
         )}
