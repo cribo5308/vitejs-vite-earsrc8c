@@ -82,6 +82,17 @@ type FinalScores = {
   B: number;
 };
 
+type PlayerSaveData = {
+  loggedIn: boolean;
+  nickname: string;
+  profileImage: string;
+  totalExp: number;
+  wins: number;
+  losses: number;
+  following: number;
+  followers: number;
+};
+
 const TURN_DURATION = 30;
 const TOTAL_TURNS = 4;
 const LANE_COUNT = 4;
@@ -111,6 +122,11 @@ const PUSH_DURATION_MS = PUSH_FLIP_INTERVAL_MS * PUSH_FLIP_COUNT;
 
 const TOTAL_BATTLE_DURATION = 120;
 const MUSIC_URL = "/audio/battle.mp3";
+
+const EXP_PER_LEVEL = 400;
+const WIN_EXP = 500;
+const LOSE_EXP = 50;
+const PLAYER_SAVE_KEY = "beatRisePlayerSave";
 
 const COMBO_MULTIPLIERS = {
   NORMAL: 1,
@@ -233,6 +249,75 @@ function getPushTimer(timeMs: number, startedAt: number, until: number) {
     nextIn,
     count,
   };
+}
+
+function loadPlayerSave(): PlayerSaveData {
+  try {
+    const raw = localStorage.getItem(PLAYER_SAVE_KEY);
+
+    if (!raw) {
+      return {
+        loggedIn: false,
+        nickname: "Danzy",
+        profileImage: "",
+        totalExp: 0,
+        wins: 0,
+        losses: 0,
+        following: 128,
+        followers: 940,
+      };
+    }
+
+    const parsed = JSON.parse(raw) as Partial<PlayerSaveData>;
+
+    return {
+      loggedIn: Boolean(parsed.loggedIn),
+      nickname: parsed.nickname || "Danzy",
+      profileImage: parsed.profileImage || "",
+      totalExp: Number(parsed.totalExp || 0),
+      wins: Number(parsed.wins || 0),
+      losses: Number(parsed.losses || 0),
+      following: Number(parsed.following || 128),
+      followers: Number(parsed.followers || 940),
+    };
+  } catch {
+    return {
+      loggedIn: false,
+      nickname: "Danzy",
+      profileImage: "",
+      totalExp: 0,
+      wins: 0,
+      losses: 0,
+      following: 128,
+      followers: 940,
+    };
+  }
+}
+
+function getLevelFromExp(totalExp: number) {
+  return Math.floor(totalExp / EXP_PER_LEVEL) + 1;
+}
+
+function getCurrentLevelExp(totalExp: number) {
+  return totalExp % EXP_PER_LEVEL;
+}
+
+function getExpPercent(totalExp: number) {
+  return (getCurrentLevelExp(totalExp) / EXP_PER_LEVEL) * 100;
+}
+
+function getRankByLevel(level: number) {
+  if (level >= 30) return "MASTER RISER";
+  if (level >= 20) return "B-BOY GOLD";
+  if (level >= 10) return "B-BOY SILVER";
+  if (level >= 5) return "STREET BRONZE";
+  return "ROOKIE";
+}
+
+function getWinRate(wins: number, losses: number) {
+  const total = wins + losses;
+  if (total <= 0) return 0;
+  return Math.round((wins / total) * 100);
 }
 
 function generateNotesFromMusicChart(turnIndex: number) {
@@ -369,23 +454,9 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [turntableAngle, setTurntableAngle] = useState(0);
 
-  const [nickname, setNickname] = useState(() => {
-    return localStorage.getItem("beatRiseNickname") || "Danzy";
-  });
-
-  const [profileImage, setProfileImage] = useState(() => {
-    return localStorage.getItem("beatRiseProfileImage") || "";
-  });
-
-  const [playerStats] = useState({
-    level: 12,
-    rank: "B-BOY SILVER",
-    exp: 68,
-    following: 128,
-    followers: 940,
-    recent: "3승 2패",
-    winRate: 62,
-  });
+  const [playerSave, setPlayerSave] = useState<PlayerSaveData>(() =>
+    loadPlayerSave()
+  );
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [firstSide, setFirstSide] = useState<Side | null>(null);
@@ -438,8 +509,24 @@ export default function App() {
   const holdPointerNoteIdsRef = useRef<Map<number, string>>(new Map());
   const lastFlipCountRef = useRef(0);
   const advancingRef = useRef(false);
+  const resultRewardAppliedRef = useRef(false);
+
+  const turntableDragRef = useRef({
+    dragging: false,
+    moved: false,
+    centerX: 0,
+    centerY: 0,
+    startPointerAngle: 0,
+    startTurntableAngle: 0,
+  });
 
   const musicRef = useRef<HTMLAudioElement | null>(null);
+
+  const playerLevel = getLevelFromExp(playerSave.totalExp);
+  const playerRank = getRankByLevel(playerLevel);
+  const playerCurrentExp = getCurrentLevelExp(playerSave.totalExp);
+  const playerExpPercent = getExpPercent(playerSave.totalExp);
+  const playerWinRate = getWinRate(playerSave.wins, playerSave.losses);
 
   const selectedTeam = useMemo(
     () =>
@@ -485,6 +572,25 @@ export default function App() {
     activeEffects.pushStartedAt,
     activeEffects.pushUntil
   );
+
+  const progressPercent = clamp((elapsed / TURN_DURATION) * 100, 0, 100);
+
+  const resultScoreA = finalScores?.A ?? scoreA;
+  const resultScoreB = finalScores?.B ?? scoreB;
+
+  const winnerSide: Side | null =
+    resultScoreA === resultScoreB
+      ? null
+      : resultScoreA > resultScoreB
+        ? "A"
+        : "B";
+
+  const iWon = winnerSide === mySide;
+
+  const opponentConnected = (serverRoom?.players.length ?? 0) >= 2;
+  const bothReady =
+    serverRoom?.players.length === 2 &&
+    serverRoom.players.every((player) => player.ready);
 
   useEffect(() => {
     const onConnect = () => setConnected(true);
@@ -536,6 +642,7 @@ export default function App() {
 
       scoreARef.current = 0;
       scoreBRef.current = 0;
+      resultRewardAppliedRef.current = false;
 
       setFirstSide(firstSide);
       resetTurnStateOnly();
@@ -638,9 +745,48 @@ export default function App() {
     scoreBRef.current = scoreB;
   }, [scoreB]);
 
+  useEffect(() => {
+    if (phase !== "result") return;
+    if (!finalScores) return;
+    if (resultRewardAppliedRef.current) return;
+
+    resultRewardAppliedRef.current = true;
+
+    const finalA = finalScores.A;
+    const finalB = finalScores.B;
+
+    const winner: Side | null =
+      finalA === finalB ? null : finalA > finalB ? "A" : "B";
+
+    const didWin = winner === mySide;
+    const gainedExp = didWin ? WIN_EXP : LOSE_EXP;
+
+    savePlayerData({
+      ...playerSave,
+      totalExp: playerSave.totalExp + gainedExp,
+      wins: didWin ? playerSave.wins + 1 : playerSave.wins,
+      losses: didWin ? playerSave.losses : playerSave.losses + 1,
+    });
+
+    window.setTimeout(() => {
+      showFeedback(
+        `EXP +${gainedExp}`,
+        "skill",
+        didWin ? "승리 보상" : "패배 보상"
+      );
+    }, 250);
+  }, [phase, finalScores]);
+
+  function savePlayerData(nextData: PlayerSaveData) {
+    setPlayerSave(nextData);
+    localStorage.setItem(PLAYER_SAVE_KEY, JSON.stringify(nextData));
+  }
+
   function saveNickname(nextName: string) {
-    setNickname(nextName);
-    localStorage.setItem("beatRiseNickname", nextName);
+    savePlayerData({
+      ...playerSave,
+      nickname: nextName,
+    });
   }
 
   function handleProfileImageChange(event: ChangeEvent<HTMLInputElement>) {
@@ -651,26 +797,72 @@ export default function App() {
 
     reader.onload = () => {
       const result = String(reader.result || "");
-      setProfileImage(result);
-      localStorage.setItem("beatRiseProfileImage", result);
+
+      savePlayerData({
+        ...playerSave,
+        profileImage: result,
+      });
     };
 
     reader.readAsDataURL(file);
   }
 
-  function spinTurntable() {
-    setTurntableAngle((prev) => prev + 120);
-  }
-
-  function openBattleFromHome() {
-    goRoom();
-  }
-
   function fakeGoogleLogin() {
-    localStorage.setItem("beatRiseLogin", "google-demo");
+    savePlayerData({
+      ...playerSave,
+      loggedIn: true,
+    });
+
     alert(
-      "지금은 테스트 로그인 UI야. 실제 구글 로그인은 Firebase 연결 후 적용 가능해."
+      "로그인 정보가 저장됐어. 지금은 테스트 저장 방식이고, 나중에 Firebase를 연결하면 진짜 Google 계정 저장으로 바꿀 수 있어."
     );
+  }
+
+  function getPointerAngle(clientX: number, clientY: number) {
+    const { centerX, centerY } = turntableDragRef.current;
+    const rad = Math.atan2(clientY - centerY, clientX - centerX);
+    return (rad * 180) / Math.PI;
+  }
+
+  function handleTurntablePointerDown(event: PointerEvent<HTMLDivElement>) {
+    const rect = event.currentTarget.getBoundingClientRect();
+
+    turntableDragRef.current = {
+      dragging: true,
+      moved: false,
+      centerX: rect.left + rect.width / 2,
+      centerY: rect.top + rect.height / 2,
+      startPointerAngle: 0,
+      startTurntableAngle: turntableAngle,
+    };
+
+    turntableDragRef.current.startPointerAngle = getPointerAngle(
+      event.clientX,
+      event.clientY
+    );
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleTurntablePointerMove(event: PointerEvent<HTMLDivElement>) {
+    if (!turntableDragRef.current.dragging) return;
+
+    const currentPointerAngle = getPointerAngle(event.clientX, event.clientY);
+    const diff = currentPointerAngle - turntableDragRef.current.startPointerAngle;
+
+    if (Math.abs(diff) > 3) {
+      turntableDragRef.current.moved = true;
+    }
+
+    setTurntableAngle(turntableDragRef.current.startTurntableAngle + diff);
+  }
+
+  function handleTurntablePointerUp(event: PointerEvent<HTMLDivElement>) {
+    turntableDragRef.current.dragging = false;
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
   }
 
   function playBattleMusic(globalStartSec: number) {
@@ -1449,6 +1641,14 @@ export default function App() {
     });
   }
 
+  function openBattleFromHome() {
+    if (turntableDragRef.current.moved) {
+      return;
+    }
+
+    goRoom();
+  }
+
   function applySkillEffect(
     skillId: string,
     skillName: string,
@@ -1605,25 +1805,6 @@ export default function App() {
     };
   }
 
-  const progressPercent = clamp((elapsed / TURN_DURATION) * 100, 0, 100);
-
-  const resultScoreA = finalScores?.A ?? scoreA;
-  const resultScoreB = finalScores?.B ?? scoreB;
-
-  const winnerSide: Side | null =
-    resultScoreA === resultScoreB
-      ? null
-      : resultScoreA > resultScoreB
-        ? "A"
-        : "B";
-
-  const iWon = winnerSide === mySide;
-
-  const opponentConnected = (serverRoom?.players.length ?? 0) >= 2;
-  const bothReady =
-    serverRoom?.players.length === 2 &&
-    serverRoom.players.every((player) => player.ready);
-
   return (
     <main className="app">
       <audio ref={musicRef} src={MUSIC_URL} preload="auto" />
@@ -1633,18 +1814,26 @@ export default function App() {
           <div className="screen homeScreen">
             <div className="homeTopProfile" onClick={() => setProfileOpen(true)}>
               <div className="profileAvatar">
-                {profileImage ? <img src={profileImage} alt="profile" /> : "D"}
+                {playerSave.profileImage ? (
+                  <img src={playerSave.profileImage} alt="profile" />
+                ) : (
+                  "D"
+                )}
               </div>
 
               <div className="profileInfo">
-                <strong>{nickname}</strong>
+                <strong>{playerSave.nickname}</strong>
                 <span>
-                  Lv.{playerStats.level} · {playerStats.rank}
+                  Lv.{playerLevel} · {playerRank}
                 </span>
 
                 <div className="expBar">
-                  <div style={{ width: `${playerStats.exp}%` }} />
+                  <div style={{ width: `${playerExpPercent}%` }} />
                 </div>
+
+                <small className="expText">
+                  {playerCurrentExp}/{EXP_PER_LEVEL} XP
+                </small>
               </div>
             </div>
 
@@ -1656,15 +1845,15 @@ export default function App() {
             </div>
 
             <div className="turntableWrap">
-              <button className="turntableSpinButton" onClick={spinTurntable}>
-                돌리기
-              </button>
-
               <div
                 className="turntable"
                 style={{
                   transform: `rotate(${turntableAngle}deg)`,
                 }}
+                onPointerDown={handleTurntablePointerDown}
+                onPointerMove={handleTurntablePointerMove}
+                onPointerUp={handleTurntablePointerUp}
+                onPointerCancel={handleTurntablePointerUp}
               >
                 <button
                   className="turntableSlice battleSlice"
@@ -1673,18 +1862,20 @@ export default function App() {
                   <span>배틀</span>
                 </button>
 
-                <button className="turntableSlice eventSlice">
-                  <span>이벤트</span>
-                </button>
-
                 <button className="turntableSlice auditionSlice">
                   <span>오디션</span>
+                </button>
+
+                <button className="turntableSlice eventSlice">
+                  <span>이벤트</span>
                 </button>
 
                 <div className="turntableCenter">
                   <b>BR</b>
                 </div>
               </div>
+
+              <p className="turntableHint">드래그해서 돌리기</p>
             </div>
 
             <div className="homeBottomNav">
@@ -1696,8 +1887,14 @@ export default function App() {
             </div>
 
             {profileOpen && (
-              <div className="modalBackdrop" onClick={() => setProfileOpen(false)}>
-                <div className="profileModal" onClick={(e) => e.stopPropagation()}>
+              <div
+                className="modalBackdrop"
+                onClick={() => setProfileOpen(false)}
+              >
+                <div
+                  className="profileModal"
+                  onClick={(event) => event.stopPropagation()}
+                >
                   <button
                     className="modalClose"
                     onClick={() => setProfileOpen(false)}
@@ -1709,8 +1906,8 @@ export default function App() {
 
                   <div className="profileEditAvatar">
                     <div className="bigAvatar">
-                      {profileImage ? (
-                        <img src={profileImage} alt="profile" />
+                      {playerSave.profileImage ? (
+                        <img src={playerSave.profileImage} alt="profile" />
                       ) : (
                         "D"
                       )}
@@ -1729,18 +1926,32 @@ export default function App() {
                   <label className="profileEditLabel">
                     닉네임
                     <input
-                      value={nickname}
-                      onChange={(e) => saveNickname(e.target.value)}
+                      value={playerSave.nickname}
+                      onChange={(event) => saveNickname(event.target.value)}
                     />
                   </label>
 
+                  <div className="levelBox">
+                    <div>
+                      <span>레벨</span>
+                      <strong>Lv.{playerLevel}</strong>
+                    </div>
+
+                    <div>
+                      <span>경험치</span>
+                      <strong>
+                        {playerCurrentExp}/{EXP_PER_LEVEL}
+                      </strong>
+                    </div>
+                  </div>
+
                   <div className="followStats">
                     <div>
-                      <strong>{playerStats.following}</strong>
+                      <strong>{playerSave.following}</strong>
                       <span>팔로우</span>
                     </div>
                     <div>
-                      <strong>{playerStats.followers}</strong>
+                      <strong>{playerSave.followers}</strong>
                       <span>팔로워</span>
                     </div>
                   </div>
@@ -1748,11 +1959,13 @@ export default function App() {
                   <div className="recordBox">
                     <div>
                       <span>최근 전적</span>
-                      <strong>{playerStats.recent}</strong>
+                      <strong>
+                        {playerSave.wins}승 {playerSave.losses}패
+                      </strong>
                     </div>
                     <div>
                       <span>승률</span>
-                      <strong>{playerStats.winRate}%</strong>
+                      <strong>{playerWinRate}%</strong>
                     </div>
                   </div>
                 </div>
@@ -1761,7 +1974,10 @@ export default function App() {
 
             {menuOpen && (
               <div className="modalBackdrop" onClick={() => setMenuOpen(false)}>
-                <div className="menuModal" onClick={(e) => e.stopPropagation()}>
+                <div
+                  className="menuModal"
+                  onClick={(event) => event.stopPropagation()}
+                >
                   <button
                     className="modalClose"
                     onClick={() => setMenuOpen(false)}
@@ -1770,15 +1986,23 @@ export default function App() {
                   </button>
 
                   <h2>메뉴</h2>
-                  <p>계정에 로그인하면 플레이 기록을 저장할 수 있어.</p>
+
+                  {playerSave.loggedIn ? (
+                    <p>
+                      Google 로그인 상태야. 현재 레벨과 전적은 이 브라우저에
+                      저장돼.
+                    </p>
+                  ) : (
+                    <p>Google 로그인을 누르면 플레이 정보가 저장돼.</p>
+                  )}
 
                   <button className="googleLoginButton" onClick={fakeGoogleLogin}>
-                    Google 로그인
+                    {playerSave.loggedIn ? "Google 로그인됨" : "Google 로그인"}
                   </button>
 
                   <small>
-                    현재는 테스트 로그인 UI야. 실제 구글 로그인은 Firebase 연결 후
-                    완성 가능.
+                    현재는 테스트 저장 방식이야. Firebase 연결 후 진짜 Google
+                    계정 저장으로 바꿀 수 있어.
                   </small>
                 </div>
               </div>
