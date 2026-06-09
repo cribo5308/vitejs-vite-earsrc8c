@@ -1764,3 +1764,167 @@ button {
 .lane.pressed:active {
   background-color: transparent !important;
 }
+/* =========================================================
+   Beat Rise - touch lane full glow + image note update
+   ========================================================= */
+
+/* 기존 버튼/글자 제거 */
+.inputButtons,
+.laneInputButton,
+.missZone span,
+.lane span,
+.judgeLine span,
+.tapNote span,
+.holdNote span {
+  display: none !important;
+}
+
+/* 레인 기본값 */
+.lane {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 25%;
+  z-index: 2;
+  background: transparent !important;
+  overflow: hidden;
+}
+
+.lane:nth-child(1) {
+  left: 0;
+}
+
+.lane:nth-child(2) {
+  left: 25%;
+}
+
+.lane:nth-child(3) {
+  left: 50%;
+}
+
+.lane:nth-child(4) {
+  left: 75%;
+}
+
+/* 눌린 라인 전체 발광 */
+.lane.pressed {
+  background: transparent !important;
+  box-shadow: none !important;
+  filter: none !important;
+}
+
+/* 기존에 생기던 큰 보라색 박스 제거 */
+.lane.pressed::before,
+.lane.pressed::after {
+  content: none !important;
+  display: none !important;
+}
+
+/* 라인 전체에 일정한 빛만 은은하게 */
+.laneFullGlow {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    rgba(120, 220, 255, 0.055) 0%,
+    rgba(150, 110, 255, 0.075) 35%,
+    rgba(150, 110, 255, 0.085) 65%,
+    rgba(215, 100, 255, 0.12) 100%
+  );
+  box-shadow:
+    inset 0 0 28px rgba(120, 230, 255, 0.06),
+    inset 0 0 54px rgba(190, 110, 255, 0.06);
+  transition: opacity 0.08s ease;
+}
+
+.lane.pressed .laneFullGlow {
+  opacity: 1;
+}
+
+/* 판정선 아래 터치 구간은 항상 일정한 보라색 */
+.missZone {
+  top: 82% !important;
+  bottom: 0 !important;
+  background: linear-gradient(
+    180deg,
+    rgba(82, 50, 150, 0.14) 0%,
+    rgba(105, 62, 185, 0.18) 55%,
+    rgba(135, 76, 220, 0.22) 100%
+  ) !important;
+  border-top: none !important;
+  box-shadow:
+    inset 0 10px 24px rgba(160, 120, 255, 0.06),
+    inset 0 -14px 30px rgba(50, 18, 95, 0.28) !important;
+  pointer-events: none !important;
+  z-index: 1;
+}
+
+/* 판정선 */
+.judgeLine {
+  z-index: 4;
+}
+
+/* 노트 공통 */
+.note {
+  z-index: 5;
+  position: absolute;
+  transform: translate(-50%, -50%);
+  user-select: none;
+  pointer-events: none;
+}
+
+/* 숏노트: 이미지 준비 */
+.tapNote {
+  width: 68px !important;
+  height: 38px !important;
+  border-radius: 999px;
+  background:
+    url("/note-tap.png") center / contain no-repeat,
+    linear-gradient(180deg, #d8ffff 0%, #95f7ff 100%) !important;
+  border: none !important;
+  color: transparent !important;
+  font-size: 0 !important;
+  box-shadow:
+    0 0 12px rgba(120, 235, 255, 0.55),
+    0 0 28px rgba(120, 235, 255, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+/* 롱노트: 이미지 준비 */
+.holdNote {
+  width: 66px !important;
+  min-height: 120px;
+  border-radius: 999px;
+  background:
+    url("/note-hold.png") center / 100% 100% no-repeat,
+    linear-gradient(180deg, #c89aff 0%, #ef4bd3 100%) !important;
+  border: none !important;
+  color: transparent !important;
+  font-size: 0 !important;
+  box-shadow:
+    0 0 14px rgba(255, 100, 230, 0.45),
+    0 0 32px rgba(255, 100, 230, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.38);
+  overflow: hidden;
+}
+
+.holdNote.holding {
+  box-shadow:
+    0 0 18px rgba(255, 210, 255, 0.7),
+    0 0 42px rgba(255, 100, 230, 0.35),
+    inset 0 0 20px rgba(255, 255, 255, 0.22);
+}
+
+/* 이미지가 아직 없을 때도 기존처럼 예쁘게 보이게 유지 */
+.tapNote::after,
+.holdNote::after {
+  content: "";
+  display: none;
+}
+
+/* 피드백은 노트보다 위 */
+.feedback {
+  z-index: 7;
+}
