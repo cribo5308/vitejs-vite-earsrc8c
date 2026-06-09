@@ -2884,3 +2884,192 @@ p {
     font-size: 16px;
   }
 }
+/* =========================================================
+   HOME TURNTABLE UPDATE
+   ========================================================= */
+
+.homeScreen {
+  padding: 0 !important;
+}
+
+.expText {
+  display: block;
+  margin-top: 4px;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.46);
+}
+
+.turntableWrap {
+  top: 51% !important;
+  width: 320px !important;
+  height: 320px !important;
+}
+
+.turntable {
+  cursor: grab;
+  touch-action: none;
+  background:
+    radial-gradient(circle at center, rgba(255, 255, 255, 0.08), transparent 35%),
+    conic-gradient(
+      from -30deg,
+      #2394ff 0deg,
+      #28b8ff 88deg,
+      #7a4dff 118deg,
+      #8c4dff 122deg,
+      #8b4dff 205deg,
+      #ff4bd8 238deg,
+      #ff42c2 242deg,
+      #ff39c8 326deg,
+      #2394ff 360deg
+    ) !important;
+}
+
+.turntable:active {
+  cursor: grabbing;
+}
+
+.turntable::before {
+  inset: 18px !important;
+  background:
+    radial-gradient(circle, rgba(255, 255, 255, 0.08), transparent 43%),
+    conic-gradient(
+      from -30deg,
+      rgba(255, 255, 255, 0.08) 0deg,
+      transparent 48deg,
+      rgba(255, 255, 255, 0.1) 118deg,
+      transparent 132deg,
+      transparent 220deg,
+      rgba(255, 255, 255, 0.12) 240deg,
+      transparent 254deg,
+      transparent 340deg,
+      rgba(255, 255, 255, 0.08) 360deg
+    ) !important;
+  box-shadow:
+    inset 0 0 30px rgba(255, 255, 255, 0.06),
+    inset 0 0 80px rgba(0, 0, 0, 0.28);
+}
+
+.turntable::after {
+  width: 112px !important;
+  height: 112px !important;
+  inset: auto !important;
+  left: 50% !important;
+  top: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  background: radial-gradient(circle, #28204f 0%, #070814 78%) !important;
+  border: 10px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.turntableCenter {
+  width: 86px !important;
+  height: 86px !important;
+  background: transparent !important;
+  border: 0 !important;
+  pointer-events: none;
+}
+
+.turntableSlice {
+  width: 120px !important;
+  height: 56px !important;
+  z-index: 9 !important;
+  pointer-events: auto;
+}
+
+.battleSlice {
+  left: 50% !important;
+  top: 42px !important;
+  transform: translateX(-50%) rotate(0deg) !important;
+  background: linear-gradient(135deg, #3dcfff, #41a7ff) !important;
+}
+
+.auditionSlice {
+  left: 24px !important;
+  bottom: 76px !important;
+  right: auto !important;
+  transform: rotate(28deg) !important;
+  transform-origin: 50% 50%;
+  background: linear-gradient(135deg, #ff4bd8, #ff83c8) !important;
+}
+
+.eventSlice {
+  right: 24px !important;
+  bottom: 76px !important;
+  left: auto !important;
+  transform: rotate(-28deg) !important;
+  transform-origin: 50% 50%;
+  background: linear-gradient(135deg, #7f54ff, #bb55ff) !important;
+}
+
+.turntableHint {
+  position: absolute;
+  left: 50%;
+  bottom: -48px;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 9px 18px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #6ceaff, #ff4bd8);
+  color: white;
+  font-weight: 950;
+  font-size: 13px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+}
+
+.turntableSpinButton {
+  display: none !important;
+}
+
+.levelBox {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.levelBox div {
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.07);
+  text-align: center;
+}
+
+.levelBox span {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.levelBox strong {
+  display: block;
+  font-size: 18px;
+}
+
+@media (max-height: 760px) {
+  .turntableWrap {
+    top: 52% !important;
+    width: 284px !important;
+    height: 284px !important;
+  }
+
+  .turntableSlice {
+    width: 106px !important;
+    height: 48px !important;
+    font-size: 15px !important;
+  }
+
+  .battleSlice {
+    top: 34px !important;
+  }
+
+  .auditionSlice {
+    left: 20px !important;
+    bottom: 66px !important;
+  }
+
+  .eventSlice {
+    right: 20px !important;
+    bottom: 66px !important;
+  }
+}
