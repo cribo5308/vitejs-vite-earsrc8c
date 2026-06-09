@@ -233,21 +233,28 @@ p {
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
 }
 
+/* =========================================================
+   Turntable - visible stable version
+   ========================================================= */
+
 .turntableWrap {
   position: absolute;
   left: 50%;
-  top: 49%;
+  top: 50%;
   width: 330px;
   height: 330px;
   transform: translate(-50%, -50%);
+  z-index: 4;
+  display: block;
+  pointer-events: auto;
 }
 
 .turntableSpinButton {
   position: absolute;
   left: 50%;
-  bottom: -54px;
+  bottom: -56px;
   transform: translateX(-50%);
-  z-index: 5;
+  z-index: 7;
   border: 0;
   border-radius: 999px;
   padding: 10px 22px;
@@ -263,82 +270,106 @@ p {
   height: 100%;
   border-radius: 50%;
   overflow: hidden;
-  transition: transform 0.55s cubic-bezier(0.2, 0.8, 0.2, 1);
-  background: #111;
+  display: block;
+  background: conic-gradient(
+    from -30deg,
+    #248dff 0deg 120deg,
+    #8b4dff 120deg 240deg,
+    #ff4bc7 240deg 360deg
+  );
   box-shadow:
-    inset 0 0 0 14px rgba(255, 255, 255, 0.05),
-    inset 0 0 80px rgba(0, 0, 0, 0.52),
-    0 30px 80px rgba(0, 0, 0, 0.45);
+    inset 0 0 0 14px rgba(255, 255, 255, 0.08),
+    inset 0 0 80px rgba(0, 0, 0, 0.42),
+    0 28px 70px rgba(0, 0, 0, 0.48);
+  transition: transform 0.55s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.turntable::before {
+  content: "";
+  position: absolute;
+  inset: 22px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 0.08) 0%,
+    rgba(255, 255, 255, 0.03) 34%,
+    rgba(0, 0, 0, 0.16) 100%
+  );
+  pointer-events: none;
+  z-index: 1;
 }
 
 .turntable::after {
   content: "";
   position: absolute;
-  inset: 35px;
+  inset: 90px;
   border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.45);
+  background: radial-gradient(circle, #30255f 0%, #090a16 78%);
+  border: 8px solid rgba(255, 255, 255, 0.1);
   pointer-events: none;
+  z-index: 3;
 }
 
 .turntableSlice {
   position: absolute;
-  inset: 0;
+  width: 118px;
+  height: 54px;
   border: 0;
+  border-radius: 999px;
   color: white;
+  font-size: 17px;
   font-weight: 1000;
-  font-size: 18px;
-  transform-origin: 50% 50%;
-  clip-path: polygon(50% 50%, 100% 0, 100% 100%);
+  z-index: 5;
+  clip-path: none;
+  box-shadow:
+    0 10px 22px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.26);
 }
 
 .turntableSlice span {
-  position: absolute;
-  right: 34px;
-  top: 48%;
-  transform-origin: center;
-  text-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  position: static;
+  display: block;
+  transform: none;
+  text-shadow: 0 4px 12px rgba(0, 0, 0, 0.46);
 }
 
 .battleSlice {
-  background: linear-gradient(135deg, #3378ff, #46eaff);
-  transform: rotate(0deg);
+  left: 50%;
+  top: 34px;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, #228cff, #5cf0ff);
 }
 
 .eventSlice {
-  background: linear-gradient(135deg, #7f54ff, #b64dff);
-  transform: rotate(120deg);
-}
-
-.eventSlice span {
-  transform: rotate(-120deg);
+  left: 28px;
+  bottom: 76px;
+  transform: none;
+  background: linear-gradient(135deg, #7f54ff, #bb55ff);
 }
 
 .auditionSlice {
-  background: linear-gradient(135deg, #ff4bd8, #ff7bc8);
-  transform: rotate(240deg);
-}
-
-.auditionSlice span {
-  transform: rotate(-240deg);
+  right: 28px;
+  bottom: 76px;
+  transform: none;
+  background: linear-gradient(135deg, #ff4bd8, #ff83c8);
 }
 
 .turntableCenter {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 94px;
-  height: 94px;
+  width: 88px;
+  height: 88px;
   transform: translate(-50%, -50%);
   border-radius: 50%;
-  background: radial-gradient(circle, #2a214f, #080914);
+  background: radial-gradient(circle, #30255f, #090a16);
   display: flex;
   align-items: center;
   justify-content: center;
   color: white;
   font-size: 28px;
-  z-index: 4;
-  border: 8px solid rgba(255, 255, 255, 0.08);
+  z-index: 6;
+  border: 7px solid rgba(255, 255, 255, 0.1);
 }
 
 .homeBottomNav {
@@ -369,6 +400,10 @@ p {
   background: linear-gradient(135deg, #645cff, #ff4bd8);
   color: white;
 }
+
+/* =========================================================
+   Modal
+   ========================================================= */
 
 .modalBackdrop {
   position: absolute;
@@ -615,7 +650,11 @@ p {
 }
 
 .selectCard.selected {
-  background: linear-gradient(145deg, rgba(90, 234, 255, 0.24), rgba(255, 75, 216, 0.18));
+  background: linear-gradient(
+    145deg,
+    rgba(90, 234, 255, 0.24),
+    rgba(255, 75, 216, 0.18)
+  );
   border-color: rgba(120, 238, 255, 0.55);
   box-shadow: 0 0 28px rgba(120, 238, 255, 0.16);
 }
@@ -708,7 +747,11 @@ p {
   height: 330px;
   margin-top: 32px;
   border-radius: 28px;
-  background: radial-gradient(circle, rgba(130, 84, 255, 0.18), rgba(255, 255, 255, 0.04));
+  background: radial-gradient(
+    circle,
+    rgba(130, 84, 255, 0.18),
+    rgba(255, 255, 255, 0.04)
+  );
   display: flex;
   align-items: center;
   justify-content: center;
@@ -904,7 +947,11 @@ p {
 }
 
 .statusLine span.active {
-  background: linear-gradient(135deg, rgba(96, 238, 255, 0.24), rgba(255, 75, 216, 0.2));
+  background: linear-gradient(
+    135deg,
+    rgba(96, 238, 255, 0.24),
+    rgba(255, 75, 216, 0.2)
+  );
   color: white;
 }
 
@@ -980,7 +1027,12 @@ p {
   opacity: 0;
   pointer-events: none;
   background:
-    radial-gradient(ellipse at center, rgba(130, 240, 255, 0.17) 0%, rgba(135, 130, 255, 0.13) 44%, rgba(200, 100, 255, 0.15) 100%);
+    radial-gradient(
+      ellipse at center,
+      rgba(130, 240, 255, 0.17) 0%,
+      rgba(135, 130, 255, 0.13) 44%,
+      rgba(200, 100, 255, 0.15) 100%
+    );
   box-shadow:
     inset 0 0 34px rgba(120, 230, 255, 0.12),
     inset 0 0 78px rgba(190, 110, 255, 0.11);
@@ -997,7 +1049,13 @@ p {
   right: 0;
   top: 82%;
   height: 3px;
-  background: linear-gradient(90deg, transparent, #8ff7ff, #ff4bd8, transparent);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    #8ff7ff,
+    #ff4bd8,
+    transparent
+  );
   box-shadow:
     0 0 12px rgba(143, 247, 255, 0.65),
     0 0 26px rgba(255, 75, 216, 0.34);
@@ -1010,7 +1068,12 @@ p {
   right: 0;
   top: 82%;
   bottom: 0;
-  background: linear-gradient(180deg, rgba(82, 50, 150, 0.14) 0%, rgba(105, 62, 185, 0.18) 55%, rgba(135, 76, 220, 0.22) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(82, 50, 150, 0.14) 0%,
+    rgba(105, 62, 185, 0.18) 55%,
+    rgba(135, 76, 220, 0.22) 100%
+  );
   border-top: none;
   box-shadow:
     inset 0 10px 24px rgba(160, 120, 255, 0.06),
@@ -1215,7 +1278,11 @@ p {
   width: 170px;
   height: 210px;
   border-radius: 34px;
-  background: linear-gradient(180deg, rgba(143, 247, 255, 0.16), rgba(255, 75, 216, 0.1));
+  background: linear-gradient(
+    180deg,
+    rgba(143, 247, 255, 0.16),
+    rgba(255, 75, 216, 0.1)
+  );
   border: 1px solid rgba(255, 255, 255, 0.12);
   display: flex;
   flex-direction: column;
@@ -1290,6 +1357,31 @@ p {
     top: 50%;
   }
 
+  .turntableSlice {
+    width: 104px;
+    height: 48px;
+    font-size: 15px;
+  }
+
+  .battleSlice {
+    top: 30px;
+  }
+
+  .eventSlice {
+    left: 24px;
+    bottom: 66px;
+  }
+
+  .auditionSlice {
+    right: 24px;
+    bottom: 66px;
+  }
+
+  .turntableCenter {
+    width: 78px;
+    height: 78px;
+  }
+
   .homeTopProfile {
     width: 200px;
   }
@@ -1303,6 +1395,32 @@ p {
   .turntableWrap {
     width: 250px;
     height: 250px;
+  }
+
+  .turntableSlice {
+    width: 94px;
+    height: 43px;
+    font-size: 14px;
+  }
+
+  .battleSlice {
+    top: 24px;
+  }
+
+  .eventSlice {
+    left: 18px;
+    bottom: 54px;
+  }
+
+  .auditionSlice {
+    right: 18px;
+    bottom: 54px;
+  }
+
+  .turntableCenter {
+    width: 68px;
+    height: 68px;
+    font-size: 22px;
   }
 
   .laneArea {
