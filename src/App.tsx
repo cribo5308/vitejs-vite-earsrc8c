@@ -825,6 +825,12 @@ export default function App() {
   }
 
   function handleTurntablePointerDown(event: PointerEvent<HTMLDivElement>) {
+    const target = event.target as HTMLElement;
+
+    if (target.closest("button")) {
+      return;
+    }
+
     const rect = event.currentTarget.getBoundingClientRect();
 
     turntableDragRef.current = {
@@ -863,6 +869,10 @@ export default function App() {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
+
+    window.setTimeout(() => {
+      turntableDragRef.current.moved = false;
+    }, 50);
   }
 
   function playBattleMusic(globalStartSec: number) {
@@ -1642,10 +1652,6 @@ export default function App() {
   }
 
   function openBattleFromHome() {
-    if (turntableDragRef.current.moved) {
-      return;
-    }
-
     goRoom();
   }
 
@@ -1857,16 +1863,28 @@ export default function App() {
               >
                 <button
                   className="turntableSlice battleSlice"
-                  onClick={openBattleFromHome}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    openBattleFromHome();
+                  }}
                 >
                   <span>배틀</span>
                 </button>
 
-                <button className="turntableSlice auditionSlice">
+                <button
+                  className="turntableSlice auditionSlice"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => event.stopPropagation()}
+                >
                   <span>오디션</span>
                 </button>
 
-                <button className="turntableSlice eventSlice">
+                <button
+                  className="turntableSlice eventSlice"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => event.stopPropagation()}
+                >
                   <span>이벤트</span>
                 </button>
 
